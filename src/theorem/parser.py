@@ -92,6 +92,11 @@ CLAUSE_HOME = {
     "after": "a clause of `return`: `return p.name after @t-42`",
     "by": "part of `group by <col> as <name>`",
     "as": "how every statement names its result: `... as <name>`",
+    "support": (
+        'a clause of `assert` or `compact`: `assert product {name: "X"} '
+        "support [doc:cat.csv#r12] as p`"
+    ),
+    "source": "shorthand for `support [<provenance>]` on `assert`",
 }
 
 
@@ -104,14 +109,14 @@ class ParseError(Exception):
 TOKEN_RE = re.compile(
     r"""
     (?P<string>"(?:[^"\\]|\\.)*")
-  | (?P<provenance>(?:doc|attach):[^\s,)}]+)
+  | (?P<provenance>(?:doc|attach):[^\s,)}\[\]]+)
   | (?P<position>@t-[0-9]+)
   | (?P<handle>@c[a-z0-9]+)
   | (?P<nodeid>\#[a-z]+-[a-z0-9]+)
   | (?P<number>-?[0-9]+(?:\.[0-9]+)?)
   | (?P<op>>=|<=|!=|=|>|<)
   | (?P<word>[A-Za-z_][A-Za-z0-9_.]*)
-  | (?P<punct>[{}(),:])
+  | (?P<punct>[{}(),:\[\]])
     """,
     re.VERBOSE,
 )
@@ -244,7 +249,8 @@ class _Parser:
             if not text.startswith("attach:"):
                 raise ParseError(
                     self.line_no,
-                    f"{text!r} is not a value; doc: provenance only follows 'source'",
+                    f"{text!r} is not a value; doc: provenance only follows "
+                    "'source' or 'support'",
                 )
             return text
         if kind == "word":
@@ -409,16 +415,44 @@ class _Parser:
         self.expect_word("tokens")
         return value
 
-    def source_opt(self) -> str | None:
-        if not self.at_word("source"):
-            return None
+    def support_opt(self) -> list[list[str]]:
+        """`source doc:x` is one bundle; `support [..] or [..]` is the full form."""
+        if self.at_word("source"):
+            self.next()
+            t = self.next()
+            if t[0] != "provenance":
+                raise ParseError(
+                    self.line_no, f"expected doc:/attach: provenance, got {t[1]!r}"
+                )
+            return [[t[1]]]
+        if not self.at_word("support"):
+            return []
         self.next()
-        t = self.next()
-        if t[0] != "provenance":
-            raise ParseError(
-                self.line_no, f"expected doc:/attach: provenance, got {t[1]!r}"
-            )
-        return t[1]
+        bundles: list[list[str]] = []
+        while True:
+            self.expect_punct("[")
+            members: list[str] = []
+            while True:
+                t = self.next()
+                if t[0] not in ("provenance", "nodeid"):
+                    raise ParseError(
+                        self.line_no,
+                        f"a bundle holds doc:/attach: provenance or node ids, got {t[1]!r}",
+                    )
+                members.append(t[1])
+                if self.peek() == ("punct", ","):
+                    self.i += 1
+                    continue
+                self.expect_punct("]")
+                break
+            bundles.append(members)
+            if self.at_word("or"):
+                self.next()
+                continue
+            break
+        if len(bundles) > 8:
+            raise ParseError(self.line_no, "a receipt holds at most 8 bundles")
+        return bundles
 
     # ---- statements ------------------------------------------------
 
@@ -633,14 +667,14 @@ class _Parser:
                 if i == 0:
                     self.expect_punct(",")
             self.expect_punct(")")
-            source = self.source_opt()
-            return AssertEdge(edge, role_refs, source)
+            support = self.support_opt()
+            return AssertEdge(edge, role_refs, support)
         cls = self.expect_name()
         props = self.props()
-        source = self.source_opt()
+        support = self.support_opt()
         self.expect_word("as")
         name = self.expect_name()
-        return AssertNode(cls, props, source, name)
+        return AssertNode(cls, props, support, name)
 
     def parse_merge(self) -> Merge:
         a = self.ref()
@@ -684,7 +718,8 @@ class _Parser:
         self.expect_word("as")
         name = self.expect_name()
         props = self.props()
-        return Compact(src, name, props)
+        support = self.support_opt()
+        return Compact(src, name, props, support)
 
     def parse_retire(self) -> Retire:
         ref = self.ref()

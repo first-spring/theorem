@@ -34,13 +34,17 @@ or          := "or"                                   ; alone on its line
 
 write_stmt  := assert_node | assert_edge | merge | distinct_s | refine
              | compact | retire | flag | derive
-assert_node := "assert" CLASSNAME props ["source" PROVENANCE] "as" NAME
+assert_node := "assert" CLASSNAME props [support] "as" NAME
 assert_edge := "assert" "edge" EDGENAME "(" ROLENAME ":" ref ","
-               ROLENAME ":" ref ")" ["source" PROVENANCE]
+               ROLENAME ":" ref ")" [support]
 merge       := "merge" ref "," ref ["prefer" ("newest" | "source" PROVENANCE)]
 distinct_s  := "distinct" ref "," ref "reason" STRING
 refine      := "refine" ref "into" CLASSNAME "with" mapping "as" NAME
-compact     := "compact" NAME "as" NAME props
+compact     := "compact" NAME "as" NAME props [support]
+support     := "support" bundle ("or" bundle)*
+             | "source" PROVENANCE            ; shorthand for support [PROVENANCE]
+bundle      := "[" evidence ("," evidence)* "]"
+evidence    := PROVENANCE | NODEID
 retire      := "retire" ref "reason" STRING
 flag        := "flag" ref "reason" STRING
 derive      := "derive" "class" NAME "from" CLASSNAME "with" propdecls
@@ -114,6 +118,7 @@ A program that verifies can still fail while running, on something the schema ca
 
 Every write returns a **receipt**: created and changed ids, position `@t-N`, the guards that ran, and dup candidates (the synchronous blocking stage inline; the async similarity stage lands in the ledger).
 
+- **support [..] or [..]**: the artifact's receipt, alternative bundles of evidence each claimed sufficient on its own. Under a deletion the artifact survives exactly when some bundle contains nothing dead; an edge additionally dies with either endpoint; an artifact with no receipt is self-supported. At most eight bundles, keeping the smallest. `refine` children cite their blob, `compact` summaries cite their members unless given a receipt, and a `merge` survivor inherits both receipts.
 - **merge a, b**: survivor is the older node; the absorbed id becomes a permanent alias; lineage records both pre-merge states. Conflicting properties resolve per the policy, default `prefer newest`.
 - **distinct a, b reason "..."**: durable pair suppression; the pair never resurfaces as a dup candidate.
 - **refine blob into class with {prop: col "colname"} as name**: the blob payload must be tabular (`attach:` CSV payloads parse at assert time). Creates one child per row, each with `origin` lineage to the blob; the blob moves to state `composite` and is retained cold.

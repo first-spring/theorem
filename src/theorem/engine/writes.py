@@ -77,6 +77,34 @@ class Receipt:
         return "\n".join(out)
 
 
+def _resolve_support(ctx: WriteContext, bundles: list[list[str]]) -> list[list[str]]:
+    """Node ids in a bundle must name live artifacts; provenance is taken as given."""
+    out = []
+    for bundle in bundles:
+        members = []
+        for member in bundle:
+            if member.startswith("#"):
+                rid = ctx.store.resolve(member)
+                art = ctx.store.nodes.get(rid) or ctx.store.edge_index.get(member)
+                if art is None or not art.live:
+                    raise WriteError(f"receipt cites {member}, which is not a live artifact")
+                members.append(rid if rid in ctx.store.nodes else member)
+            else:
+                members.append(member)
+        out.append(members)
+    from .storage import cap_bundles
+
+    return cap_bundles(out)
+
+
+def _first_provenance(bundles: list[list[str]]) -> str | None:
+    for bundle in bundles:
+        for member in bundle:
+            if not member.startswith("#"):
+                return member
+    return None
+
+
 def _quota_check(ctx: WriteContext, cls: str) -> None:
     cdef = ctx.schema.classes[cls]
     if cdef.status == "provisional" and cdef.quota is not None:
@@ -113,15 +141,18 @@ def _assert_node(stmt: AssertNode, ctx: WriteContext) -> Receipt:
     if stmt.cls == "table_blob":
         state = "blob"
     nid = store.next_id(stmt.cls)
+    support = _resolve_support(ctx, stmt.support)
     record = {
         "op": "put_node",
         "id": nid,
         "cls": stmt.cls,
         "props": props,
         "state": state,
+        "support": support,
     }
-    if stmt.source:
-        props["_source"] = stmt.source
+    provenance = _first_provenance(support)
+    if provenance:
+        props["_source"] = provenance  # what `merge ... prefer source` reads
     if rows is not None:
         props["_rows"] = rows
     pos = store.apply(record)
@@ -158,7 +189,10 @@ def _assert_edge(stmt: AssertEdge, ctx: WriteContext) -> Receipt:
                 f"role {role} of {stmt.edge} takes a {want}; {nid} is a {got}"
             )
     eid = store.next_id("edge")
-    pos = store.apply({"op": "put_edge", "id": eid, "type": stmt.edge, "roles": roles})
+    support = _resolve_support(ctx, stmt.support)
+    pos = store.apply(
+        {"op": "put_edge", "id": eid, "type": stmt.edge, "roles": roles, "support": support}
+    )
     role_str = ", ".join(f"{r}: {n}" for r, n in roles.items())
     return Receipt(
         [
@@ -236,7 +270,7 @@ def _merge(stmt: Merge, ctx: WriteContext) -> Receipt:
     )
     # re-home absorbed node's edges onto the survivor
     for edge in list(store.edges.get(absorbed.id, [])):
-        if edge.retired_at is not None:
+        if not edge.live:
             continue
         new_roles = {
             r: (survivor.id if store.resolve(nid) == absorbed.id else nid)
@@ -249,10 +283,14 @@ def _merge(stmt: Merge, ctx: WriteContext) -> Receipt:
                 "id": store.next_id("edge"),
                 "type": edge.type,
                 "roles": new_roles,
+                "support": edge.support,
             }
         )
     store.apply({"op": "alias", "absorbed": absorbed.id, "survivor": survivor.id})
-    pos = store.apply({"op": "patch_node", "id": survivor.id, "props": merged})
+    union = [b for b in na.support if b] + [b for b in nb.support if b not in na.support]
+    pos = store.apply(
+        {"op": "patch_node", "id": survivor.id, "props": merged, "support": union}
+    )
     store.apply(
         {"op": "retire", "id": absorbed.id, "reason": f"merged into {survivor.id}"}
     )
@@ -324,6 +362,7 @@ def _refine(stmt: Refine, ctx: WriteContext) -> Receipt:
                 "props": props,
                 "state": "atom",
                 "origin": blob_id,
+                "support": [[blob_id]],
             }
         )
         store.apply(
@@ -368,6 +407,9 @@ def _compact(stmt: Compact, ctx: WriteContext) -> Receipt:
         raise WriteError(f"compact needs one class, got {sorted(classes)}")
     cls = classes.pop()
     sid = store.next_id(cls)
+    support = _resolve_support(ctx, stmt.support) or [
+        [store.resolve(m) for m in members]
+    ]
     store.apply(
         {
             "op": "put_node",
@@ -375,6 +417,7 @@ def _compact(stmt: Compact, ctx: WriteContext) -> Receipt:
             "cls": cls,
             "props": dict(stmt.props),
             "state": "composite",
+            "support": support,
         }
     )
     for m in members:

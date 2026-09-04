@@ -111,6 +111,12 @@ def _props(props: dict) -> str:
     return "{" + ", ".join(f"{k}: {_literal(v)}" for k, v in props.items()) + "}"
 
 
+def _support(bundles: list[list[str]]) -> str:
+    if not bundles:
+        return ""
+    return " support " + " or ".join("[" + ", ".join(b) + "]" for b in bundles)
+
+
 def render_stmt(stmt: Stmt) -> str:
     match stmt:
         case Find(target=t, cond=cond, name=n, order_by=ob, desc=d):
@@ -163,15 +169,11 @@ def render_stmt(stmt: Stmt) -> str:
             return out
         case SchemaStmt():
             return "schema"
-        case AssertNode(cls=cls, props=props, source=src, name=n):
-            out = f"assert {cls} {_props(props)}"
-            if src:
-                out += f" source {src}"
-            return out + f" as {n}"
-        case AssertEdge(edge=e, role_refs=roles, source=src):
+        case AssertNode(cls=cls, props=props, support=sup, name=n):
+            return f"assert {cls} {_props(props)}{_support(sup)} as {n}"
+        case AssertEdge(edge=e, role_refs=roles, support=sup):
             args = ", ".join(f"{r}: {v}" for r, v in roles.items())
-            out = f"assert edge {e}({args})"
-            return out + (f" source {src}" if src else "")
+            return f"assert edge {e}({args}){_support(sup)}"
         case Merge(a=a, b=b, policy=policy):
             out = f"merge {a}, {b}"
             return out + (f" prefer {policy}" if policy else "")
@@ -180,8 +182,8 @@ def render_stmt(stmt: Stmt) -> str:
         case Refine(ref=ref, into_cls=cls, mapping=mapping, name=n):
             cols = ", ".join(f"{k}: col {_quoted(v)}" for k, v in mapping.items())
             return f"refine {ref} into {cls} with {{{cols}}} as {n}"
-        case Compact(src=src, name=n, props=props):
-            return f"compact {src} as {n} {_props(props)}"
+        case Compact(src=src, name=n, props=props, support=sup):
+            return f"compact {src} as {n} {_props(props)}{_support(sup)}"
         case Retire(ref=ref, reason=reason):
             return f"retire {ref} reason {_quoted(reason)}"
         case Flag(ref=ref, reason=reason):

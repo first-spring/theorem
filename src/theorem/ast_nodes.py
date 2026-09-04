@@ -103,7 +103,7 @@ class Continue(Stmt):
 class AssertNode(Stmt):
     cls: str
     props: dict[str, object]
-    source: str | None
+    support: list[list[str]]  # receipt: alternative evidence bundles
     name: str
 
 
@@ -111,7 +111,7 @@ class AssertNode(Stmt):
 class AssertEdge(Stmt):
     edge: str
     role_refs: dict[str, str]  # role name -> binding name or node id
-    source: str | None
+    support: list[list[str]]
 
 
 @dataclass
@@ -141,6 +141,7 @@ class Compact(Stmt):
     src: str
     name: str
     props: dict[str, object]
+    support: list[list[str]] = field(default_factory=list)
 
 
 @dataclass

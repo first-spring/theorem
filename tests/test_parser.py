@@ -105,7 +105,7 @@ def test_continuation_lines_join():
     assert len(stmts) == 1
     a = stmts[0]
     assert type(a) is AssertNode
-    assert a.cls == "part" and a.name == "gs" and a.source == "doc:d/p3"
+    assert a.cls == "part" and a.name == "gs" and a.support == [["doc:d/p3"]]
     assert a.props == {"name": "x", "unit_cost": 12.0}
 
 
@@ -116,7 +116,7 @@ def test_assert_edge():
     assert type(e) is AssertEdge
     assert e.edge == "supplied_by"
     assert e.role_refs == {"item": "gs", "source": "voltachem"}
-    assert e.source == "doc:d/p3"
+    assert e.support == [["doc:d/p3"]]
 
 
 def test_merge_and_distinct():
