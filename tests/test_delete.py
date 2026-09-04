@@ -265,6 +265,43 @@ def test_patch_edge_without_support_is_refused_before_the_wal(tmp_path):
     again.close()
 
 
+def test_patch_node_refuses_a_malformed_support_or_unset_before_the_wal(tmp_path):
+    """A receipt written as a bare string indexes as single characters, and
+    an unset written as one drops a property per letter. Neither reaches
+    the log."""
+    import pytest
+
+    from theorem.engine.storage import StoreError
+
+    store = Store(tmp_path)
+    a = put(store, "supplier", support=[["doc:a.csv#r1"]], name="A", country="DE")
+    before = store.position
+    with pytest.raises(StoreError):
+        store.apply({"op": "patch_node", "id": a, "props": {}, "support": "doc:x.csv"})
+    with pytest.raises(StoreError):
+        store.apply({"op": "patch_node", "id": a, "props": {}, "unset": "country"})
+    assert store.position == before
+    assert store.wal_len() == before
+    assert store.nodes[a].support == [["doc:a.csv#r1"]]
+    assert store.nodes[a].props["country"] == "DE"
+    store.close()
+
+
+def test_an_edge_cannot_be_asserted_onto_a_tombstoned_endpoint(tmp_path):
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "Ionix"} as a')
+    s.execute('assert part {name: "cell"} as p')
+    s.execute('delete #s-1 reason "gone"')
+    out = s.run("assert edge supplied_by(item: p, source: a)")
+    assert "error" in out.lower()
+    assert "#s-1" in out and "deleted or retired" in out
+    assert list(s.store.edge_index) == []
+    s.close()
+
+
 def test_restore_refuses_malformed_kept_dead(tmp_path):
     import pytest
 

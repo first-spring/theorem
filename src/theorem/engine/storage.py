@@ -147,6 +147,42 @@ def _check_support(record: dict) -> None:
         raise StoreError(f"{record['op']}: support must be a list of lists of strings")
 
 
+# Every key a lineage kind's replay reads without checking first.
+_LINEAGE_KEYS = {
+    "rename_class": ("name", "to"),
+    "rename_prop": ("cls", "name", "to"),
+    "alter_class": ("cls", "action"),
+    "drop_class": ("name", "cascade", "edge_types"),
+    "drop_edge": ("name", "cascade"),
+}
+
+
+def _check_lineage(record: dict) -> None:
+    """A lineage record must carry everything its replay will look up.
+
+    Replay applies these straight, with no validation of its own, so a
+    record missing a key raises KeyError inside the constructor and the
+    store never opens again. Refusing it here keeps the log appliable.
+    """
+    kind = record.get("kind")
+    for key in _LINEAGE_KEYS.get(kind, ()):
+        if key not in record:
+            raise StoreError(f"lineage {kind}: {key} is required")
+    if kind in ("drop_class", "drop_edge"):
+        _check_cascade(record)
+    elif kind == "alter_class":
+        action = record["action"]
+        if action not in ("add", "drop", "retype"):
+            raise StoreError(
+                f"lineage alter_class: action must be add, drop or retype, got {action!r}"
+            )
+        if action == "drop":
+            if not isinstance(record.get("names"), list):
+                raise StoreError("lineage alter_class drop: names must be a list")
+        elif not isinstance(record.get("decls"), dict):
+            raise StoreError(f"lineage alter_class {action}: decls must be an object")
+
+
 class Store:
     """One writer per directory.
 
@@ -413,6 +449,15 @@ class Store:
         if op in ("patch_node", "retire", "flag", "traffic"):
             if record.get("id") not in self.nodes:
                 raise StoreError(f"{op}: unknown node {record.get('id')!r}")
+            if op == "patch_node":
+                if not isinstance(record.get("props"), dict):
+                    raise StoreError("patch_node: props must be an object")
+                unset = record.get("unset", [])
+                if not isinstance(unset, list) or not all(
+                    isinstance(name, str) for name in unset
+                ):
+                    raise StoreError("patch_node: unset must be a list of property names")
+                _check_support(record)
         elif op == "retire_edge":
             if record.get("id") not in self.edge_index:
                 raise StoreError(f"retire_edge: unknown edge {record.get('id')!r}")
@@ -454,8 +499,8 @@ class Store:
             if "support" not in record:
                 raise StoreError("patch_edge: support is required")
             _check_support(record)
-        elif op == "lineage" and record.get("kind") in ("drop_class", "drop_edge"):
-            _check_cascade(record)
+        elif op == "lineage":
+            _check_lineage(record)
 
     def _live_artifact(self, art_id, kind):
         if kind == "node":

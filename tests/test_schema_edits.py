@@ -236,3 +236,32 @@ def test_drops_survive_restart_and_a_dropped_name_can_return(tmp_path):
     assert s2.schema.classes["tag"].props == {"colour": "str"}
     assert s2.rows("find tag as t\nreturn t.name") == []
     s2.close()
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"kind": "rename_class", "name": "supplier"},
+        {"kind": "rename_prop", "cls": "supplier", "name": "country"},
+        {"kind": "alter_class", "cls": "supplier"},
+        {"kind": "alter_class", "cls": "supplier", "action": "sideways", "decls": {}},
+        {"kind": "alter_class", "cls": "supplier", "action": "add"},
+        {"kind": "alter_class", "cls": "supplier", "action": "retype"},
+        {"kind": "alter_class", "cls": "supplier", "action": "drop"},
+        {"kind": "drop_class", "name": "supplier", "cascade": []},
+        {"kind": "drop_edge", "name": "supplied_by"},
+    ],
+)
+def test_a_lineage_record_missing_what_replay_reads_is_refused(tmp_path, record):
+    """Replay applies these without validating, so a record missing a key
+    would raise KeyError inside the constructor and the store would never
+    open again. The WAL must never hold one."""
+    from theorem.engine.storage import Store, StoreError
+
+    store = Store(tmp_path)
+    before = store.position
+    with pytest.raises(StoreError):
+        store.apply({"op": "lineage", **record})
+    assert store.position == before
+    assert store.wal_len() == before
+    store.close()

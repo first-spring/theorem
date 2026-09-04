@@ -187,6 +187,11 @@ def _assert_edge(stmt: AssertEdge, ctx: WriteContext) -> Receipt:
     roles = {role: ctx.resolve_ref(ref) for role, ref in stmt.role_refs.items()}
     edef = ctx.schema.edges[stmt.edge]
     for role, nid in roles.items():
+        # An edge dies with either endpoint, so one built on a tombstone is
+        # born dead and every read would skip it anyway. Refusing it here
+        # says so, rather than writing a record nothing can see.
+        if not store.nodes[nid].live:
+            raise WriteError(f"{stmt.role_refs[role]} ({nid}) is deleted or retired")
         want = edef.roles[role]
         got = store.nodes[nid].cls
         base_chain = {got}
