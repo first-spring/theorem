@@ -541,11 +541,22 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
     # of that set; clearing this deletion's own victims first, then putting
     # them back before the durable write, closes that gap without touching
     # the shared cascade code the forward delete also relies on.
+    #
+    # This mutates shared Node/Edge objects in place for the span of the
+    # computation below, so a read of the store during that span would see
+    # a half-restored state. That is safe only because the store is
+    # single-writer: it holds an exclusive process-level lock for its whole
+    # lifetime (`storage._acquire_lock`), and a session executes statements
+    # synchronously, single-threaded, so nothing else runs while this
+    # window is open. If a concurrent reader is ever added inside the same
+    # locked process (a background thread, an async read path), this
+    # window has to be closed first, e.g. by computing over a shadow copy
+    # instead of mutating the live objects.
     original = {a.id: (a.deleted_at, a.deleted_by) for a in gone}
-    for a in gone:
-        a.deleted_at = None
-        a.deleted_by = None
     try:
+        for a in gone:
+            a.deleted_at = None
+            a.deleted_by = None
         still_dead = {
             a.id
             for a in [*store.nodes.values(), *store.edge_index.values()]
