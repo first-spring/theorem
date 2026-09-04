@@ -214,6 +214,9 @@ class Store:
         self.withdrawn: dict[int, str] = {}
         # positions of drop_class/drop_edge lineage records; restore refuses them
         self.drops: set[int] = set()
+        # child class name -> parent class name, maintained on every lineage
+        # replay so it sees through renames, unlike scanning derive_class records
+        self.subclass_of: dict[str, str] = {}
         self.id_counters: dict[str, int] = {}
         self.position = 0
         try:
@@ -399,6 +402,7 @@ class Store:
         self.sources = {}
         self.withdrawn = {}
         self.drops = set()
+        self.subclass_of = {}
         self.id_counters = {}
         self.position = 0
         self._wal_records = 0
@@ -579,7 +583,7 @@ class Store:
                 }
             )
         for rec in self.lineage:
-            records.append({**rec, "op": "lineage", "_pos": rec.get("_pos", 0)})
+            records.append({**rec, "op": "lineage", "_applied": True, "_pos": rec.get("_pos", 0)})
         for pair in self.distinct_pairs:
             if len(pair) != 2:  # defensive: self-pairs collapse to one element
                 continue
@@ -736,6 +740,107 @@ class Store:
 
     # ---- record application ---------------------------------------
 
+    @staticmethod
+    def retype_value(value, typ: str):
+        if value is None:
+            return None
+        if typ == "str":
+            return str(value)
+        if typ == "int":
+            return int(value)
+        if typ == "float":
+            return float(value)
+        if typ == "bool":
+            if isinstance(value, str):
+                if value.lower() in ("true", "1", "yes"):
+                    return True
+                if value.lower() in ("false", "0", "no"):
+                    return False
+                raise ValueError(value)
+            return bool(value)
+        raise ValueError(typ)
+
+    def _class_and_subclasses(self, cls: str) -> list[str]:
+        out = [cls]
+        changed = True
+        while changed:
+            changed = False
+            for child, parent in self.subclass_of.items():
+                if parent in out and child not in out:
+                    out.append(child)
+                    changed = True
+        return out
+
+    def _apply_lineage(self, rec: dict, pos: int) -> None:
+        kind = rec.get("kind")
+        # Index effects apply on every replay. Node effects apply only to a
+        # record that has not been folded into a snapshot: a snapshot writes
+        # nodes in their final state before the lineage that shaped them, so
+        # replaying a rename on them would rename twice and empty by_class.
+        if kind == "derive_class":
+            self.subclass_of[rec["child"]] = rec["parent"]
+        if kind in ("drop_class", "drop_edge"):
+            self.drops.add(pos)
+        if kind == "rename_class":
+            old, new = rec["name"], rec["to"]
+            self.subclass_of = {
+                (new if c == old else c): (new if p == old else p) for c, p in self.subclass_of.items()
+            }
+        if rec.get("_applied"):
+            return
+        if kind == "rename_class":
+            old, new = rec["name"], rec["to"]
+            ids = self.by_class.pop(old, [])
+            self.by_class[new] = ids
+            for nid in ids:
+                node = self.nodes[nid]
+                self._deindex_name(node)
+                self._deindex_props(node)
+                node.cls = new
+                self._index_name(node)
+            self.indexed_props = {(new if c == old else c, p) for c, p in self.indexed_props}
+            self.by_prop = {(new if c == old else c, p): v for (c, p), v in self.by_prop.items()}
+            for nid in ids:
+                self._index_props(self.nodes[nid])
+        elif kind == "rename_prop":
+            old, new = rec["name"], rec["to"]
+            for cls in self._class_and_subclasses(rec["cls"]):
+                for nid in self.by_class.get(cls, []):
+                    node = self.nodes[nid]
+                    if old in node.props:
+                        self._deindex_props(node)
+                        node.props[new] = node.props.pop(old)
+                        self._index_props(node)
+        elif kind == "alter_class" and rec["action"] == "drop":
+            for cls in self._class_and_subclasses(rec["cls"]):
+                for nid in self.by_class.get(cls, []):
+                    node = self.nodes[nid]
+                    self._deindex_props(node)
+                    for name in rec["names"]:
+                        node.props.pop(name, None)
+                    self._index_props(node)
+        elif kind == "alter_class" and rec["action"] == "retype":
+            for cls in self._class_and_subclasses(rec["cls"]):
+                for nid in self.by_class.get(cls, []):
+                    node = self.nodes[nid]
+                    self._deindex_props(node)
+                    for name, typ in rec["decls"].items():
+                        if name in node.props:
+                            try:
+                                node.props[name] = self.retype_value(node.props[name], typ)
+                            except (ValueError, TypeError):
+                                # The writer preflights every node, so this
+                                # only happens on a record from an older
+                                # build. Replay must open the store, not raise.
+                                pass
+                    self._index_props(node)
+        elif kind in ("drop_class", "drop_edge"):
+            for k, art_id in rec.get("cascade", []):
+                art = self.nodes.get(art_id) if k == "node" else self.edge_index.get(art_id)
+                if art is not None:
+                    art.deleted_at = pos
+                    art.deleted_by = pos
+
     def _apply_to_memory(self, rec: dict, pos: int) -> None:
         op = rec["op"]
         # Replay resilience: a record referencing a node/edge that never
@@ -853,6 +958,7 @@ class Store:
                 self.dependents.setdefault(rec["survivor"], set()).update(moved)
         elif op == "lineage":
             self.lineage.append({**rec, "_pos": pos})
+            self._apply_lineage(rec, pos)
         elif op == "distinct":
             self.distinct_pairs.add(frozenset((rec["a"], rec["b"])))
         elif op == "dup":

@@ -86,6 +86,61 @@ class Schema:
             out.update(cdef.props)
         return out
 
+    # ---- evolution: shared by the verifier (staging), the writes, and replay
+
+    def own_prop(self, cls: str, prop: str) -> None:
+        """Raise unless `prop` is declared on `cls` itself, naming the declarer otherwise."""
+        cdef = self.classes[cls]
+        if prop in cdef.props:
+            return
+        base = cdef.base
+        while base is not None:
+            if prop in self.classes[base].props:
+                raise ValueError(f'property "{prop}" is declared on base class {base}; change it there')
+            base = self.classes[base].base
+        raise KeyError(prop)
+
+    def rename_class(self, old: str, new: str) -> None:
+        cdef = self.classes.pop(old)
+        cdef.name = new
+        self.classes[new] = cdef
+        for other in self.classes.values():
+            if other.base == old:
+                other.base = new
+        for edef in self.edges.values():
+            for role, cls in edef.roles.items():
+                if cls == old:
+                    edef.roles[role] = new
+
+    def rename_prop(self, cls: str, old: str, new: str) -> None:
+        self.own_prop(cls, old)
+        cdef = self.classes[cls]
+        cdef.props = {(new if k == old else k): v for k, v in cdef.props.items()}
+
+    def alter_add(self, cls: str, decls: dict[str, str]) -> None:
+        self.classes[cls].props.update(decls)
+
+    def alter_drop(self, cls: str, names: list[str]) -> None:
+        for name in names:
+            self.own_prop(cls, name)
+            del self.classes[cls].props[name]
+
+    def alter_retype(self, cls: str, decls: dict[str, str]) -> None:
+        for name, typ in decls.items():
+            self.own_prop(cls, name)
+            self.classes[cls].props[name] = typ
+
+    def drop_class(self, name: str) -> list[str]:
+        """Remove the class and every edge type naming it; returns the edge names."""
+        del self.classes[name]
+        gone = [e for e, edef in self.edges.items() if name in edef.roles.values()]
+        for e in gone:
+            del self.edges[e]
+        return gone
+
+    def drop_edge(self, name: str) -> None:
+        del self.edges[name]
+
     @staticmethod
     def supply_chain() -> Schema:
         """The running-example schema from the design docs."""

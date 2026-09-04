@@ -118,6 +118,21 @@ class Session:
                 name = rec["name"]
                 if name in self.schema.classes:
                     self.schema.classes[name].status = "deprecated"
+            elif kind == "rename_class" and rec["name"] in self.schema.classes:
+                self.schema.rename_class(rec["name"], rec["to"])
+            elif kind == "rename_prop" and rec["cls"] in self.schema.classes:
+                self.schema.rename_prop(rec["cls"], rec["name"], rec["to"])
+            elif kind == "alter_class" and rec["cls"] in self.schema.classes:
+                if rec["action"] == "add":
+                    self.schema.alter_add(rec["cls"], dict(rec["decls"]))
+                elif rec["action"] == "drop":
+                    self.schema.alter_drop(rec["cls"], list(rec["names"]))
+                elif rec["action"] == "retype":
+                    self.schema.alter_retype(rec["cls"], dict(rec["decls"]))
+            elif kind == "drop_class" and rec["name"] in self.schema.classes:
+                self.schema.drop_class(rec["name"])
+            elif kind == "drop_edge" and rec["name"] in self.schema.edges:
+                self.schema.drop_edge(rec["name"])
 
         # The "playbook" tag on a derive_class/derive_edge record is set by
         # mutating the in-memory lineage dict at apply time and is never
