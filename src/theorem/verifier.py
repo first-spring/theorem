@@ -20,6 +20,7 @@ from .ast_nodes import (
     Compute,
     Cond,
     Continue,
+    Delete,
     DeriveClass,
     DeriveEdge,
     Distinct,
@@ -457,6 +458,10 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
 
         case Retire(ref=ref) | Flag(ref=ref):
             _ref_type(ref, env, line)
+
+        case Delete(ref=ref, kind=kind):
+            if kind == "node":
+                _ref_type(ref, env, line)
 
         case DeriveClass(
             name=name, base=base, props=dprops, quota=dquota, dedup=ddedup

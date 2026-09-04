@@ -27,6 +27,7 @@ from .ast_nodes import (
     Compute,
     Cond,
     Continue,
+    Delete,
     DeriveClass,
     DeriveEdge,
     Distinct,
@@ -188,6 +189,9 @@ def render_stmt(stmt: Stmt) -> str:
             return f"retire {ref} reason {_quoted(reason)}"
         case Flag(ref=ref, reason=reason):
             return f"flag {ref} reason {_quoted(reason)}"
+        case Delete(ref=ref, kind=kind, reason=reason, preview=preview):
+            head = "delete edge" if kind == "edge" else "delete"
+            return f"{head} {ref} reason {_quoted(reason)}" + (" preview" if preview else "")
         case DeriveClass(name=n, base=base, props=props, quota=quota, dedup=dedup):
             decls = ", ".join(f"{k}: {v}" for k, v in props.items())
             out = f"derive class {n} from {base} with {{{decls}}}"

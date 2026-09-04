@@ -273,3 +273,62 @@ def test_restore_refuses_malformed_kept_dead(tmp_path):
     p = store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
     with pytest.raises(StoreError):
         store.apply({"op": "restore", "of": p, "kept_dead": [["node", a]]})
+
+
+def _session(tmp_path):
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "Ionix"} support [doc:a.csv#r1] as a')
+    s.execute('assert part {name: "cell"} support [doc:a.csv#r2] as p')
+    s.execute("assert edge supplied_by(item: p, source: a) support [doc:a.csv#r2]")
+    return s
+
+
+def test_delete_parses_and_canonicalizes():
+    from theorem.canonical import canonical
+    from theorem.parser import parse
+
+    stmt = parse('delete #s-1 reason "dup" preview')[0]
+    assert (stmt.ref, stmt.kind, stmt.reason, stmt.preview) == ("#s-1", "node", "dup", True)
+    assert canonical('delete edge #e-3 reason "wrong"') == 'delete edge #e-3 reason "wrong"'
+
+
+def test_preview_writes_nothing_and_matches_commit(tmp_path):
+    s = _session(tmp_path)
+    before = s.store.position
+    out = s.execute('delete #s-1 reason "gone" preview')
+    assert "preview: delete #s-1 would remove" in out
+    assert "cascade: 1 nodes, 1 edges" in out
+    assert s.store.position == before
+    out = s.execute('delete #s-1 reason "gone"')
+    assert "receipt: deleted #s-1 at @t-" in out
+    assert "cascade: 1 nodes, 1 edges" in out
+    assert "restore with: restore @t-" in out
+    assert s.rows("find supplier as x\nreturn x.name") == []
+    s.close()
+
+
+def test_delete_by_binding_name(tmp_path):
+    s = _session(tmp_path)
+    out = s.execute('find supplier where name = "Ionix" as x\ndelete x reason "gone"')
+    assert "receipt: deleted #s-1" in out
+    s.close()
+
+
+def test_delete_edge(tmp_path):
+    s = _session(tmp_path)
+    out = s.execute('delete edge #e-1 reason "wrong link"')
+    assert "receipt: deleted #e-1" in out
+    assert s.rows("find part as p\nfollow p supplied_by source as sup\nreturn sup.name") == []
+    assert s.rows("find supplier as x\nreturn x.name") == [["Ionix"]]
+    s.close()
+
+
+def test_delete_of_a_deleted_node_is_an_error(tmp_path):
+    s = _session(tmp_path)
+    s.execute('delete #s-1 reason "gone"')
+    out = s.run('delete #s-1 reason "again"')
+    assert "error" in out and "#s-1" in out
+    s.close()

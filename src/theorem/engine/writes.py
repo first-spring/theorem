@@ -14,6 +14,7 @@ from ..ast_nodes import (
     AssertEdge,
     AssertNode,
     Compact,
+    Delete,
     DeriveClass,
     DeriveEdge,
     Distinct,
@@ -452,6 +453,51 @@ def _flag(stmt: Flag, ctx: WriteContext) -> Receipt:
     return Receipt([f"receipt: flagged {nid} at @t-{pos}", "  health.query updated"])
 
 
+def _cascade_lines(store, cascade) -> list[str]:
+    lines = [f"  cascade: {len(cascade.nodes)} nodes, {len(cascade.edges)} edges"]
+    groups: dict[str, list[str]] = {}
+    for nid in cascade.nodes:
+        groups.setdefault(store.nodes[nid].cls, []).append(nid)
+    for eid in cascade.edges:
+        groups.setdefault(store.edge_index[eid].type, []).append(eid)
+    for name, ids in groups.items():
+        shown = ", ".join(ids[:20])
+        more = f" and {len(ids) - 20} more" if len(ids) > 20 else ""
+        lines.append(f"    {name}: {shown}{more}")
+    return lines
+
+def _delete(stmt: Delete, ctx: WriteContext) -> Receipt:
+    store = ctx.store
+    if stmt.kind == "edge":
+        edge = store.edge_index.get(stmt.ref)
+        if edge is None or not edge.live:
+            raise WriteError(f"no live edge {stmt.ref}")
+        target, cascade = stmt.ref, store.cascade(edges=[stmt.ref])
+    else:
+        nid = ctx.resolve_ref(stmt.ref)
+        if not store.nodes[nid].live:
+            raise WriteError(f"{stmt.ref} ({nid}) is already deleted or retired")
+        target, cascade = nid, store.cascade(nodes=[nid])
+    if stmt.preview:
+        return Receipt([f"preview: delete {target} would remove", *_cascade_lines(store, cascade)])
+    pos = store.apply(
+        {
+            "op": "delete",
+            "id": target,
+            "kind": stmt.kind,
+            "reason": stmt.reason,
+            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+        }
+    )
+    return Receipt(
+        [
+            f"receipt: deleted {target} at @t-{pos}",
+            f"  reason: {stmt.reason}",
+            *_cascade_lines(store, cascade),
+            f"  restore with: restore @t-{pos}",
+        ]
+    )
+
 def _derive(stmt: DeriveClass, ctx: WriteContext) -> Receipt:
     schema = ctx.schema
     # durable record FIRST: if the append fails, the live schema must not
@@ -535,6 +581,8 @@ def execute_write(stmt: Stmt, ctx: WriteContext) -> Receipt:
             return _retire(stmt, ctx)
         case Flag():
             return _flag(stmt, ctx)
+        case Delete():
+            return _delete(stmt, ctx)
         case DeriveClass():
             return _derive(stmt, ctx)
         case DeriveEdge():

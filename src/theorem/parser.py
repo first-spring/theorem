@@ -19,6 +19,7 @@ from .ast_nodes import (
     Compute,
     Cond,
     Continue,
+    Delete,
     DeriveClass,
     DeriveEdge,
     Distinct,
@@ -97,6 +98,14 @@ CLAUSE_HOME = {
         "support [doc:cat.csv#r12] as p`"
     ),
     "source": "shorthand for `support [<provenance>]` on `assert`",
+    "preview": (
+        "a trailing clause of delete, withdraw, drop class, drop edge: "
+        "computes the cascade and writes nothing"
+    ),
+    "reason": (
+        "a clause of retire, flag, delete, withdraw, drop: "
+        '`... reason "why"`'
+    ),
 }
 
 
@@ -454,6 +463,12 @@ class _Parser:
             raise ParseError(self.line_no, "a receipt holds at most 8 bundles")
         return bundles
 
+    def preview_opt(self) -> bool:
+        if self.at_word("preview"):
+            self.next()
+            return True
+        return False
+
     # ---- statements ------------------------------------------------
 
     def statement(self) -> Stmt:
@@ -730,6 +745,18 @@ class _Parser:
         ref = self.ref()
         self.expect_word("reason")
         return Flag(ref, self.string())
+
+    def parse_delete(self) -> Delete:
+        kind = "node"
+        if self.at_word("edge"):
+            self.next()
+            kind = "edge"
+        ref = self.ref()
+        if kind == "edge" and not ref.startswith("#"):
+            raise ParseError(self.line_no, "delete edge takes an edge id such as #e-3")
+        self.expect_word("reason")
+        reason = self.string()
+        return Delete(ref, kind, reason, self.preview_opt())
 
     def parse_derive(self) -> Stmt:
         if self.at_word("edge"):

@@ -33,7 +33,7 @@ continue    := "continue" HANDLE ["budget" INT "tokens"]
 or          := "or"                                   ; alone on its line
 
 write_stmt  := assert_node | assert_edge | merge | distinct_s | refine
-             | compact | retire | flag | derive
+             | compact | retire | flag | delete | derive
 assert_node := "assert" CLASSNAME props [support] "as" NAME
 assert_edge := "assert" "edge" EDGENAME "(" ROLENAME ":" ref ","
                ROLENAME ":" ref ")" [support]
@@ -47,6 +47,7 @@ bundle      := "[" evidence ("," evidence)* "]"
 evidence    := PROVENANCE | NODEID
 retire      := "retire" ref "reason" STRING
 flag        := "flag" ref "reason" STRING
+delete      := "delete" ["edge"] ref "reason" STRING ["preview"]
 derive      := "derive" "class" NAME "from" CLASSNAME "with" propdecls
                  ["quota" INT] ["dedup" NUMBER]
              | "derive" "edge" EDGENAME "(" ROLENAME ":" CLASSNAME ","
@@ -125,6 +126,7 @@ Every write returns a **receipt**: created and changed ids, position `@t-N`, the
 - **compact binding as name {props}**: replaces the bound node set with one summary node (state `composite`, parent lineage).
 - **retire ref reason "..."**: temporal invalidation. The node keeps its history and is excluded from current-time reads.
 - **flag ref reason "..."**: marks the node as having caused a downstream failure; feeds `health.query`.
+- **delete ref reason "..."** / **delete edge ref reason "..."**: tombstone the artifact and everything its removal leaves unsupported, in one record. `preview` computes and reports the cascade without writing. Deleted artifacts leave every read; `restore @t-N` reverses the record. Differs from `retire` by cascading and by being restorable.
 - **derive class name from base with {...}**: creates a provisional subclass with an instance quota (500 in v0, `quota N` to change it; `dedup R` sets the class's dup threshold). Status is queryable via `find class`.
 - **derive edge name(role: class, role: class)**: declares an edge type at runtime, with exactly two roles. Both survive a restart: the derivation is a lineage record, and a session rebuilds the schema entries a previous process created.
 

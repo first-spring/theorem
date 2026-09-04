@@ -157,6 +157,14 @@ class Flag(Stmt):
 
 
 @dataclass
+class Delete(Stmt):
+    ref: str
+    kind: str  # "node" | "edge"
+    reason: str
+    preview: bool = False
+
+
+@dataclass
 class DeriveClass(Stmt):
     name: str
     base: str
