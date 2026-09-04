@@ -775,3 +775,11 @@ class Store:
                 "otherwise mean applying every write around this one and "
                 "calling the result the graph."
             )
+
+    # ---- receipts ----------------------------------------------------
+
+    def cascade(self, nodes=(), edges=(), sources=()):
+        """What deleting these would take with it. Pure; see engine/cascade.py."""
+        from .cascade import compute
+
+        return compute(self, nodes=nodes, edges=edges, sources=sources)
