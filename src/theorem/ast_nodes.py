@@ -165,6 +165,18 @@ class Delete(Stmt):
 
 
 @dataclass
+class Withdraw(Stmt):
+    source: str  # document name, no anchor
+    reason: str
+    preview: bool = False
+
+
+@dataclass
+class Restore(Stmt):
+    position: int
+
+
+@dataclass
 class DeriveClass(Stmt):
     name: str
     base: str

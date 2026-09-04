@@ -32,10 +32,12 @@ from .ast_nodes import (
     Merge,
     Or,
     Refine,
+    Restore,
     Retire,
     Return,
     SchemaStmt,
     Stmt,
+    Withdraw,
 )
 from .schema import EdgeDef, Schema
 
@@ -462,6 +464,9 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
         case Delete(ref=ref, kind=kind):
             if kind == "node":
                 _ref_type(ref, env, line)
+
+        case Withdraw() | Restore():
+            pass
 
         case DeriveClass(
             name=name, base=base, props=dprops, quota=dquota, dedup=ddedup

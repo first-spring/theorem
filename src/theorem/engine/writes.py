@@ -21,12 +21,14 @@ from ..ast_nodes import (
     Flag,
     Merge,
     Refine,
+    Restore,
     Retire,
     Stmt,
+    Withdraw,
 )
 from ..schema import ClassDef, EdgeDef, Schema
 from . import dedup
-from .storage import Store
+from .storage import Store, source_of
 
 PROVISIONAL_QUOTA = 500
 
@@ -498,6 +500,102 @@ def _delete(stmt: Delete, ctx: WriteContext) -> Receipt:
         ]
     )
 
+def _withdraw(stmt: Withdraw, ctx: WriteContext) -> Receipt:
+    store = ctx.store
+    cascade = store.cascade(sources=[stmt.source])
+    if stmt.preview:
+        return Receipt([f"preview: withdraw {stmt.source} would remove", *_cascade_lines(store, cascade)])
+    pos = store.apply(
+        {
+            "op": "withdraw",
+            "source": stmt.source,
+            "reason": stmt.reason,
+            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+        }
+    )
+    return Receipt(
+        [
+            f"receipt: withdrew {stmt.source} at @t-{pos}",
+            f"  reason: {stmt.reason}",
+            *_cascade_lines(store, cascade),
+            f"  restore with: restore @t-{pos}",
+        ]
+    )
+
+
+def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
+    from .cascade import alive
+
+    store = ctx.store
+    if stmt.position in store.drops:
+        raise WriteError(f"@t-{stmt.position} dropped a class or edge type; derive it again and reload")
+    gone = store._deleted_by(stmt.position)
+    if not gone:
+        raise WriteError(f"nothing was deleted at @t-{stmt.position}")
+    # Evaluate aliveness as it will read right after this restore lands: a
+    # bundle citing a sibling victim of this same deletion must see that
+    # sibling as live again, not as dead from the pre-restore store, which
+    # `store.apply` has not touched yet. `cascade.alive()` falls back to the
+    # live artifact's own `deleted_at` for ids outside the `dead` set it is
+    # given, so a sibling still tombstoned in memory reads dead regardless
+    # of that set; clearing this deletion's own victims first, then putting
+    # them back before the durable write, closes that gap without touching
+    # the shared cascade code the forward delete also relies on.
+    original = {a.id: (a.deleted_at, a.deleted_by) for a in gone}
+    for a in gone:
+        a.deleted_at = None
+        a.deleted_by = None
+    try:
+        still_dead = {
+            a.id
+            for a in [*store.nodes.values(), *store.edge_index.values()]
+            if a.deleted_at is not None
+        }
+        dead_sources = {src for pos, src in store.withdrawn.items() if pos != stmt.position}
+        kept: list[list] = []
+        for art in gone:
+            if alive(store, art.id, still_dead, dead_sources):
+                continue
+            # Attribute it to the newest deletion among its dead evidence, so
+            # restoring that one brings it back.
+            dead_ids_by = [
+                (store.nodes.get(m) or store.edge_index.get(m)).deleted_by
+                for bundle in art.support
+                for m in bundle
+                if m.startswith("#")
+                and (store.nodes.get(m) or store.edge_index.get(m)) is not None
+                and (store.nodes.get(m) or store.edge_index.get(m)).deleted_at is not None
+            ]
+            if dead_ids_by:
+                by = max(dead_ids_by)
+            else:
+                # Nothing but provenance tokens in its evidence; it is still
+                # dead because a withdrawal it cites is still in force. Blame
+                # the newest one, so restoring that is what brings it back.
+                withdrawal_positions = [
+                    pos
+                    for pos, src in store.withdrawn.items()
+                    if pos != stmt.position
+                    and any(source_of(m) == src for bundle in art.support for m in bundle)
+                ]
+                by = max(withdrawal_positions) if withdrawal_positions else stmt.position
+            kept.append(["edge" if art.id in store.edge_index else "node", art.id, by])
+    finally:
+        for a in gone:
+            a.deleted_at, a.deleted_by = original[a.id]
+    pos = store.apply({"op": "restore", "of": stmt.position, "kept_dead": kept})
+    kept_ids = {k[1] for k in kept}
+    restored = [a for a in gone if a.id not in kept_ids]
+    nodes = sum(1 for a in restored if a.id in store.nodes)
+    edges = len(restored) - nodes
+    lines = [f"receipt: restored {nodes} nodes, {edges} edges from @t-{stmt.position} at @t-{pos}"]
+    if kept:
+        lines.append(f"  still dead: {len(kept)}, their evidence is gone; restore the later deletion first")
+        for _kind, art_id, by in kept[:20]:
+            lines.append(f"    {art_id} (needs restore @t-{by})")
+    return Receipt(lines)
+
+
 def _derive(stmt: DeriveClass, ctx: WriteContext) -> Receipt:
     schema = ctx.schema
     # durable record FIRST: if the append fails, the live schema must not
@@ -583,6 +681,10 @@ def execute_write(stmt: Stmt, ctx: WriteContext) -> Receipt:
             return _flag(stmt, ctx)
         case Delete():
             return _delete(stmt, ctx)
+        case Withdraw():
+            return _withdraw(stmt, ctx)
+        case Restore():
+            return _restore(stmt, ctx)
         case DeriveClass():
             return _derive(stmt, ctx)
         case DeriveEdge():

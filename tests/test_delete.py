@@ -1,3 +1,5 @@
+import pytest
+
 from theorem.engine.storage import Store
 
 from tests.test_receipts import link, put
@@ -332,3 +334,99 @@ def test_delete_of_a_deleted_node_is_an_error(tmp_path):
     out = s.run('delete #s-1 reason "again"')
     assert "error" in out and "#s-1" in out
     s.close()
+
+
+def test_withdraw_takes_everything_only_that_source_built(tmp_path):
+    s = _session(tmp_path)
+    s.execute('assert supplier {name: "Keep"} support [doc:a.csv#r9] or [doc:b.csv#r1] as k')
+    out = s.execute('withdraw doc:a.csv reason "retracted" preview')
+    assert "preview: withdraw doc:a.csv would remove" in out
+    assert "cascade: 2 nodes, 1 edges" in out
+    out = s.execute('withdraw doc:a.csv reason "retracted"')
+    assert "receipt: withdrew doc:a.csv at @t-" in out
+    assert s.rows("find supplier as x\nreturn x.name") == [["Keep"]]
+    s.close()
+
+
+def test_withdraw_accepts_an_anchor_and_uses_the_document(tmp_path):
+    from theorem.parser import parse
+
+    assert parse('withdraw doc:a.csv#r3 reason "x"')[0].source == "doc:a.csv"
+
+
+def test_restore_reverses_a_whole_cascade(tmp_path):
+    s = _session(tmp_path)
+    out = s.execute('delete #s-1 reason "oops"')
+    pos = out.split("restore @t-")[1].split()[0]
+    out = s.execute(f"restore @t-{pos}")
+    assert "receipt: restored 1 nodes, 1 edges from @t-" in out
+    assert s.rows("find part as p\nfollow p supplied_by source as sup\nreturn sup.name") == [["Ionix"]]
+    s.close()
+
+
+def test_restore_of_a_position_that_deleted_nothing_is_an_error(tmp_path):
+    s = _session(tmp_path)
+    out = s.run("restore @t-1")
+    assert "error" in out and "nothing was deleted at @t-1" in out
+    s.close()
+
+
+def test_restore_leaves_an_artifact_dead_when_its_other_evidence_is(tmp_path):
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "A"} as a\nassert supplier {name: "B"} as b')
+    s.execute('assert supplier {name: "Z"} support [#s-1, #s-2] as z')
+    first = s.execute('delete #s-1 reason "a"').split("restore @t-")[1].split()[0]
+    second = s.execute('delete #s-2 reason "b"').split("restore @t-")[1].split()[0]
+    out = s.execute(f"restore @t-{first}")
+    assert "restored 1 nodes, 0 edges" in out and "still dead: 1" in out and f"needs restore @t-{second}" in out
+    assert s.rows("find supplier as x\nreturn x.name order by x.name") == [["A"]]
+    s.execute(f"restore @t-{second}")
+    assert s.rows("find supplier as x\nreturn x.name order by x.name") == [["A"], ["B"], ["Z"]]
+    s.close()
+
+
+@pytest.mark.xfail(strict=True, reason="drop class lands in Task 12")
+def test_restore_refuses_a_drop(tmp_path):
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute("derive class tag from entity with {}")
+    out = s.execute('drop class tag reason "x"')
+    pos = out.split("at @t-")[1].split()[0]
+    assert "derive it again" in s.run(f"restore @t-{pos}")
+    s.close()
+
+
+def test_restore_of_a_withdrawal_attributes_a_still_dead_artifact_to_the_other_withdrawal(tmp_path):
+    """Z's evidence is two provenance tokens in one bundle, no node ids. When
+    both sources are withdrawn and the older withdrawal is restored, Z has no
+    dead #-id evidence to blame; the guard must fall back to the newest
+    withdrawal whose source Z's support still cites."""
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "Z"} support [doc:a.csv#r1, doc:b.csv#r1] as z')
+    first = s.execute('withdraw doc:a.csv reason "a"').split("restore @t-")[1].split()[0]
+    second = s.execute('withdraw doc:b.csv reason "b"').split("restore @t-")[1].split()[0]
+    out = s.execute(f"restore @t-{first}")
+    assert "restored 0 nodes, 0 edges" in out
+    assert "still dead: 1" in out and f"needs restore @t-{second}" in out
+    assert s.rows("find supplier as x\nreturn x.name") == []
+    s.execute(f"restore @t-{second}")
+    assert s.rows("find supplier as x\nreturn x.name") == [["Z"]]
+    s.close()
+
+
+def test_withdraw_parses_and_canonicalizes():
+    from theorem.canonical import canonical
+    from theorem.parser import parse
+
+    stmt = parse('withdraw doc:a.csv reason "dup" preview')[0]
+    assert (stmt.source, stmt.reason, stmt.preview) == ("doc:a.csv", "dup", True)
+    assert canonical('restore @t-7') == 'restore @t-7'
+    assert canonical('withdraw doc:a.csv reason "retracted"') == 'withdraw doc:a.csv reason "retracted"'

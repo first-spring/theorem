@@ -39,10 +39,12 @@ from .ast_nodes import (
     Merge,
     Or,
     Refine,
+    Restore,
     Retire,
     Return,
     SchemaStmt,
     Stmt,
+    Withdraw,
 )
 
 
@@ -192,6 +194,10 @@ def render_stmt(stmt: Stmt) -> str:
         case Delete(ref=ref, kind=kind, reason=reason, preview=preview):
             head = "delete edge" if kind == "edge" else "delete"
             return f"{head} {ref} reason {_quoted(reason)}" + (" preview" if preview else "")
+        case Withdraw(source=source, reason=reason, preview=preview):
+            return f"withdraw {source} reason {_quoted(reason)}" + (" preview" if preview else "")
+        case Restore(position=position):
+            return f"restore @t-{position}"
         case DeriveClass(name=n, base=base, props=props, quota=quota, dedup=dedup):
             decls = ", ".join(f"{k}: {v}" for k, v in props.items())
             out = f"derive class {n} from {base} with {{{decls}}}"

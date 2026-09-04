@@ -31,10 +31,12 @@ from .ast_nodes import (
     Merge,
     Or,
     Refine,
+    Restore,
     Retire,
     Return,
     SchemaStmt,
     Stmt,
+    Withdraw,
 )
 
 
@@ -757,6 +759,21 @@ class _Parser:
         self.expect_word("reason")
         reason = self.string()
         return Delete(ref, kind, reason, self.preview_opt())
+
+    def parse_withdraw(self) -> Withdraw:
+        t = self.next()
+        if t[0] != "provenance":
+            raise ParseError(self.line_no, f"expected a doc:/attach: source, got {t[1]!r}")
+        source = t[1].split("#", 1)[0]
+        self.expect_word("reason")
+        reason = self.string()
+        return Withdraw(source, reason, self.preview_opt())
+
+    def parse_restore(self) -> Restore:
+        t = self.next()
+        if t[0] != "position":
+            raise ParseError(self.line_no, f"expected a position such as @t-42, got {t[1]!r}")
+        return Restore(int(t[1][3:]))
 
     def parse_derive(self) -> Stmt:
         if self.at_word("edge"):
