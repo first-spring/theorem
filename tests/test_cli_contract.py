@@ -84,3 +84,31 @@ def test_canonical_exits_non_zero_on_a_program_it_cannot_parse(tmp_path, capsys)
     bad = write(tmp_path, "bad.thm", "find\n")
     assert main(["canonical", str(bad)]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_stats_reports_deleted_nodes_beside_retired_ones(tmp_path, capsys):
+    """A store whose node count includes tombstones reads as bigger than
+    anything it can answer from."""
+    from theorem.engine.storage import Store
+
+    db = tmp_path / "db"
+    store = Store(db)
+    for name in ("A", "B"):
+        nid = store.next_id("supplier")
+        store.apply(
+            {"op": "put_node", "id": nid, "cls": "supplier", "props": {"name": name}}
+        )
+    store.apply({"op": "retire", "id": "#s-1", "reason": "old"})
+    store.apply(
+        {
+            "op": "delete",
+            "id": "#s-2",
+            "kind": "node",
+            "reason": "gone",
+            "cascade": [["node", "#s-2"]],
+        }
+    )
+    store.close()
+    assert main(["stats", "--db", str(db)]) == 0
+    out = capsys.readouterr().out
+    assert "1 retired" in out and "1 deleted" in out

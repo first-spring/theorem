@@ -97,7 +97,9 @@ def _resolve_support(ctx: WriteContext, bundles: list[list[str]]) -> list[list[s
                 rid = ctx.store.resolve(member)
                 art = ctx.store.nodes.get(rid) or ctx.store.edge_index.get(member)
                 if art is None or not art.live:
-                    raise WriteError(f"receipt cites {member}, which is not a live artifact")
+                    raise WriteError(
+                        f"receipt cites {member}, which is not a live artifact"
+                    )
                 members.append(rid if rid in ctx.store.nodes else member)
             else:
                 members.append(member)
@@ -206,7 +208,13 @@ def _assert_edge(stmt: AssertEdge, ctx: WriteContext) -> Receipt:
     eid = store.next_id("edge")
     support = _resolve_support(ctx, stmt.support)
     pos = store.apply(
-        {"op": "put_edge", "id": eid, "type": stmt.edge, "roles": roles, "support": support}
+        {
+            "op": "put_edge",
+            "id": eid,
+            "type": stmt.edge,
+            "roles": roles,
+            "support": support,
+        }
     )
     role_str = ", ".join(f"{r}: {n}" for r, n in roles.items())
     return Receipt(
@@ -302,7 +310,9 @@ def _merge(stmt: Merge, ctx: WriteContext) -> Receipt:
             }
         )
     store.apply({"op": "alias", "absorbed": absorbed.id, "survivor": survivor.id})
-    union = [b for b in na.support if b] + [b for b in nb.support if b not in na.support]
+    union = [b for b in na.support if b] + [
+        b for b in nb.support if b and b not in na.support
+    ]
     pos = store.apply(
         {"op": "patch_node", "id": survivor.id, "props": merged, "support": union}
     )
@@ -489,7 +499,9 @@ def _set(stmt: SetProps, ctx: WriteContext) -> Receipt:
     pos = store.apply({"op": "patch_node", "id": nid, "props": values, "unset": unset})
     changed = ", ".join(sorted(values)) or "nothing"
     removed = f"; removed {', '.join(unset)}" if unset else ""
-    return Receipt([f"receipt: set {nid} at @t-{pos}", f"  changed: {changed}{removed}"])
+    return Receipt(
+        [f"receipt: set {nid} at @t-{pos}", f"  changed: {changed}{removed}"]
+    )
 
 
 def _cascade_lines(store, cascade) -> list[str]:
@@ -505,6 +517,7 @@ def _cascade_lines(store, cascade) -> list[str]:
         lines.append(f"    {name}: {shown}{more}")
     return lines
 
+
 def _delete(stmt: Delete, ctx: WriteContext) -> Receipt:
     store = ctx.store
     if stmt.kind == "edge":
@@ -518,14 +531,17 @@ def _delete(stmt: Delete, ctx: WriteContext) -> Receipt:
             raise WriteError(f"{stmt.ref} ({nid}) is already deleted or retired")
         target, cascade = nid, store.cascade(nodes=[nid])
     if stmt.preview:
-        return Receipt([f"preview: delete {target} would remove", *_cascade_lines(store, cascade)])
+        return Receipt(
+            [f"preview: delete {target} would remove", *_cascade_lines(store, cascade)]
+        )
     pos = store.apply(
         {
             "op": "delete",
             "id": target,
             "kind": stmt.kind,
             "reason": stmt.reason,
-            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+            "cascade": [["node", n] for n in cascade.nodes]
+            + [["edge", e] for e in cascade.edges],
         }
     )
     return Receipt(
@@ -537,17 +553,24 @@ def _delete(stmt: Delete, ctx: WriteContext) -> Receipt:
         ]
     )
 
+
 def _withdraw(stmt: Withdraw, ctx: WriteContext) -> Receipt:
     store = ctx.store
     cascade = store.cascade(sources=[stmt.source])
     if stmt.preview:
-        return Receipt([f"preview: withdraw {stmt.source} would remove", *_cascade_lines(store, cascade)])
+        return Receipt(
+            [
+                f"preview: withdraw {stmt.source} would remove",
+                *_cascade_lines(store, cascade),
+            ]
+        )
     pos = store.apply(
         {
             "op": "withdraw",
             "source": stmt.source,
             "reason": stmt.reason,
-            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+            "cascade": [["node", n] for n in cascade.nodes]
+            + [["edge", e] for e in cascade.edges],
         }
     )
     return Receipt(
@@ -565,7 +588,9 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
 
     store = ctx.store
     if stmt.position in store.drops:
-        raise WriteError(f"@t-{stmt.position} dropped a class or edge type; derive it again and reload")
+        raise WriteError(
+            f"@t-{stmt.position} dropped a class or edge type; derive it again and reload"
+        )
     gone = store._deleted_by(stmt.position)
     if not gone:
         raise WriteError(f"nothing was deleted at @t-{stmt.position}")
@@ -599,7 +624,9 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
             for a in [*store.nodes.values(), *store.edge_index.values()]
             if a.deleted_at is not None
         }
-        dead_sources = {src for pos, src in store.withdrawn.items() if pos != stmt.position}
+        dead_sources = {
+            src for pos, src in store.withdrawn.items() if pos != stmt.position
+        }
         kept: list[list] = []
         for art in gone:
             if alive(store, art.id, still_dead, dead_sources):
@@ -612,7 +639,8 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
                 for m in bundle
                 if m.startswith("#")
                 and (store.nodes.get(m) or store.edge_index.get(m)) is not None
-                and (store.nodes.get(m) or store.edge_index.get(m)).deleted_at is not None
+                and (store.nodes.get(m) or store.edge_index.get(m)).deleted_at
+                is not None
             ]
             # An edge also dies with either endpoint, and an endpoint is not
             # in its receipt. Without this, an edge held down by a node some
@@ -634,9 +662,13 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
                     pos
                     for pos, src in store.withdrawn.items()
                     if pos != stmt.position
-                    and any(source_of(m) == src for bundle in art.support for m in bundle)
+                    and any(
+                        source_of(m) == src for bundle in art.support for m in bundle
+                    )
                 ]
-                by = max(withdrawal_positions) if withdrawal_positions else stmt.position
+                by = (
+                    max(withdrawal_positions) if withdrawal_positions else stmt.position
+                )
             kept.append(["edge" if art.id in store.edge_index else "node", art.id, by])
     finally:
         for a in gone:
@@ -646,9 +678,13 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
     restored = [a for a in gone if a.id not in kept_ids]
     nodes = sum(1 for a in restored if a.id in store.nodes)
     edges = len(restored) - nodes
-    lines = [f"receipt: restored {nodes} nodes, {edges} edges from @t-{stmt.position} at @t-{pos}"]
+    lines = [
+        f"receipt: restored {nodes} nodes, {edges} edges from @t-{stmt.position} at @t-{pos}"
+    ]
     if kept:
-        lines.append(f"  still dead: {len(kept)}, their evidence is gone; restore the later deletion first")
+        lines.append(
+            f"  still dead: {len(kept)}, their evidence is gone; restore the later deletion first"
+        )
         for _kind, art_id, by in kept[:20]:
             lines.append(f"    {art_id} (needs restore @t-{by})")
     return Receipt(lines)
@@ -713,17 +749,34 @@ def _derive_edge(stmt: DeriveEdge, ctx: WriteContext) -> Receipt:
 def _rename_class(stmt: RenameClass, ctx: WriteContext) -> Receipt:
     # durable record FIRST, matching _derive: the live schema must not move
     # a class that would silently vanish on restart
-    pos = ctx.store.apply({"op": "lineage", "kind": "rename_class", "name": stmt.name, "to": stmt.to})
+    pos = ctx.store.apply(
+        {"op": "lineage", "kind": "rename_class", "name": stmt.name, "to": stmt.to}
+    )
     ctx.schema.rename_class(stmt.name, stmt.to)
-    count = len(ctx.store.by_class.get(stmt.to, []))
-    return Receipt([f"receipt: renamed class {stmt.name} to {stmt.to} at @t-{pos}", f"  {count} nodes keep their ids"])
+    count = len(ctx.store.live_by_class(stmt.to))
+    return Receipt(
+        [
+            f"receipt: renamed class {stmt.name} to {stmt.to} at @t-{pos}",
+            f"  {count} nodes keep their ids",
+        ]
+    )
+
 
 def _rename_prop(stmt: RenameProp, ctx: WriteContext) -> Receipt:
     pos = ctx.store.apply(
-        {"op": "lineage", "kind": "rename_prop", "cls": stmt.cls, "name": stmt.name, "to": stmt.to}
+        {
+            "op": "lineage",
+            "kind": "rename_prop",
+            "cls": stmt.cls,
+            "name": stmt.name,
+            "to": stmt.to,
+        }
     )
     ctx.schema.rename_prop(stmt.cls, stmt.name, stmt.to)
-    return Receipt([f"receipt: renamed property {stmt.cls}.{stmt.name} to {stmt.to} at @t-{pos}"])
+    return Receipt(
+        [f"receipt: renamed property {stmt.cls}.{stmt.name} to {stmt.to} at @t-{pos}"]
+    )
+
 
 def _alter_class(stmt: AlterClass, ctx: WriteContext) -> Receipt:
     store, schema = ctx.store, ctx.schema
@@ -742,16 +795,27 @@ def _alter_class(stmt: AlterClass, ctx: WriteContext) -> Receipt:
                             bad.append(f"{nid}.{name}={node.props[name]!r}")
         if bad:
             raise WriteError(
-                f"cannot convert {len(bad)} values on {stmt.cls}: " + ", ".join(bad[:10])
-                + ("..." if len(bad) > 10 else "") + ". set them first"
+                f"cannot convert {len(bad)} values on {stmt.cls}: "
+                + ", ".join(bad[:10])
+                + ("..." if len(bad) > 10 else "")
+                + ". set them first"
             )
-    record = {"op": "lineage", "kind": "alter_class", "cls": stmt.cls, "action": stmt.action}
+    record = {
+        "op": "lineage",
+        "kind": "alter_class",
+        "cls": stmt.cls,
+        "action": stmt.action,
+    }
     if stmt.action == "drop":
         record["names"] = stmt.names
         # The values leave the nodes; the record keeps them, so history
         # survives compaction and a later reload can consult them.
         record["values"] = {
-            nid: {name: store.nodes[nid].props[name] for name in stmt.names if name in store.nodes[nid].props}
+            nid: {
+                name: store.nodes[nid].props[name]
+                for name in stmt.names
+                if name in store.nodes[nid].props
+            }
             for cls in store._class_and_subclasses(stmt.cls)
             for nid in store.by_class.get(cls, [])
             if any(name in store.nodes[nid].props for name in stmt.names)
@@ -770,13 +834,19 @@ def _alter_class(stmt: AlterClass, ctx: WriteContext) -> Receipt:
         what = "retyped " + ", ".join(f"{k}: {v}" for k, v in stmt.decls.items())
     return Receipt([f"receipt: altered class {stmt.cls} at @t-{pos}", f"  {what}"])
 
+
 def _drop_class(stmt: DropClass, ctx: WriteContext) -> Receipt:
     store, schema = ctx.store, ctx.schema
     nodes = [nid for nid in store.by_class.get(stmt.name, []) if store.nodes[nid].live]
-    edge_types = [e for e, edef in schema.edges.items() if stmt.name in edef.roles.values()]
+    edge_types = [
+        e for e, edef in schema.edges.items() if stmt.name in edef.roles.values()
+    ]
     typed = [e.id for e in store.edge_index.values() if e.live and e.type in edge_types]
     cascade = store.cascade(nodes=nodes, edges=typed)
-    lines = _cascade_lines(store, cascade) + [f"  edge types: {', '.join(edge_types) or 'none'}"]
+    lines = [
+        *_cascade_lines(store, cascade),
+        f"  edge types: {', '.join(edge_types) or 'none'}",
+    ]
     if stmt.preview:
         return Receipt([f"preview: drop class {stmt.name} would remove", *lines])
     pos = store.apply(
@@ -785,30 +855,51 @@ def _drop_class(stmt: DropClass, ctx: WriteContext) -> Receipt:
             "kind": "drop_class",
             "name": stmt.name,
             "reason": stmt.reason,
-            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+            "cascade": [["node", n] for n in cascade.nodes]
+            + [["edge", e] for e in cascade.edges],
             "edge_types": edge_types,
         }
     )
     schema.drop_class(stmt.name)
-    return Receipt([f"receipt: dropped class {stmt.name} at @t-{pos}", f"  reason: {stmt.reason}", *lines])
+    return Receipt(
+        [
+            f"receipt: dropped class {stmt.name} at @t-{pos}",
+            f"  reason: {stmt.reason}",
+            *lines,
+        ]
+    )
+
 
 def _drop_edge(stmt: DropEdge, ctx: WriteContext) -> Receipt:
     store, schema = ctx.store, ctx.schema
     typed = [e.id for e in store.edge_index.values() if e.live and e.type == stmt.name]
     cascade = store.cascade(edges=typed)
     if stmt.preview:
-        return Receipt([f"preview: drop edge {stmt.name} would remove", *_cascade_lines(store, cascade)])
+        return Receipt(
+            [
+                f"preview: drop edge {stmt.name} would remove",
+                *_cascade_lines(store, cascade),
+            ]
+        )
     pos = store.apply(
         {
             "op": "lineage",
             "kind": "drop_edge",
             "name": stmt.name,
             "reason": stmt.reason,
-            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+            "cascade": [["node", n] for n in cascade.nodes]
+            + [["edge", e] for e in cascade.edges],
         }
     )
     schema.drop_edge(stmt.name)
-    return Receipt([f"receipt: dropped edge {stmt.name} at @t-{pos}", f"  reason: {stmt.reason}", *_cascade_lines(store, cascade)])
+    return Receipt(
+        [
+            f"receipt: dropped edge {stmt.name} at @t-{pos}",
+            f"  reason: {stmt.reason}",
+            *_cascade_lines(store, cascade),
+        ]
+    )
+
 
 def deprecate_class(session, name: str) -> str:
     cdef = session.schema.classes[name]

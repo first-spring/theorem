@@ -1,4 +1,8 @@
+from theorem.canonical import canonical
 from theorem.engine.storage import Store
+from theorem.parser import parse
+from theorem.schema import Schema
+from theorem.session import Session
 
 
 def put(store, cls, support=None, **props):
@@ -21,7 +25,9 @@ def link(store, etype, support=None, **roles):
 
 def test_support_is_stored_and_indexed_both_ways(tmp_path):
     store = Store(tmp_path)
-    a = put(store, "supplier", support=[["doc:a.csv#r1"], ["doc:b.csv#r7"]], name="Ionix")
+    a = put(
+        store, "supplier", support=[["doc:a.csv#r1"], ["doc:b.csv#r7"]], name="Ionix"
+    )
     assert store.nodes[a].support == [["doc:a.csv#r1"], ["doc:b.csv#r7"]]
     assert store.dependents["doc:a.csv#r1"] == {a}
     assert store.dependents["doc:b.csv#r7"] == {a}
@@ -74,12 +80,6 @@ def test_a_receipt_keeps_its_eight_smallest_bundles(tmp_path):
     a = put(store, "supplier", support=bundles, name="A")
     kept = store.nodes[a].support
     assert len(kept) == 8 and [len(b) for b in kept] == list(range(1, 9))
-
-
-from theorem.canonical import canonical
-from theorem.parser import parse
-from theorem.schema import Schema
-from theorem.session import Session
 
 
 def test_support_parses_and_canonicalizes():
@@ -139,7 +139,9 @@ def test_compact_summary_cites_its_members_by_default(tmp_path):
     s.execute('find supplier as all\ncompact all as summary {name: "AB"}')
     summary = s.store.by_name[("supplier", "ab")][0]
     members = sorted(s.store.nodes[summary].support[0])
-    assert members == sorted(s.store.by_name[("supplier", "a")] + s.store.by_name[("supplier", "b")])
+    assert members == sorted(
+        s.store.by_name[("supplier", "a")] + s.store.by_name[("supplier", "b")]
+    )
     s.close()
 
 
@@ -177,3 +179,30 @@ def test_merge_does_not_resurrect_a_deleted_edge(tmp_path):
     ]
     assert live_supplied_by == []
     s.close()
+
+
+def test_a_ninth_bundle_is_capped_rather_than_refused():
+    """The spec says a receipt keeps its eight smallest bundles. Refusing
+    the ninth makes an agent's honest citation an error instead."""
+    bundles = " or ".join(f"[doc:{i}.csv#r1]" for i in range(9))
+    stmt = parse(f'assert supplier {{name: "A"}} support {bundles} as a')[0]
+    assert len(stmt.support) == 9
+
+
+def test_a_ninth_bundle_reaches_the_store_capped_at_eight(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    bundles = " or ".join(f"[doc:{i}.csv#r1]" for i in range(9))
+    s.execute(f'assert supplier {{name: "A"}} support {bundles} as a')
+    a = s.store.by_name[("supplier", "a")][0]
+    assert len(s.store.nodes[a].support) == 8
+    s.close()
+
+
+def test_an_empty_bundle_never_makes_an_artifact_immortal(tmp_path):
+    """An empty bundle holds nothing dead by construction, so keeping one
+    would let an artifact outlive every source it ever cited."""
+    store = Store(tmp_path)
+    a = put(store, "supplier", support=[[], ["doc:a.csv#r1"]], name="A")
+    assert store.nodes[a].support == [["doc:a.csv#r1"]]
+    assert store.cascade(sources=["doc:a.csv"]).nodes == [a]
+    store.close()

@@ -116,7 +116,9 @@ def test_a_deleted_document_does_not_supply_the_focus(tmp_path):
     raw = b"# New\n\nVoltaChem supplies cells."
     r = stage(sess, normalize(raw, "new.md"), "new.md", raw)
     _delete(sess, old.doc_id)
-    good = 'assert supplier {name: "VoltaChem", country: "DE"} source doc:new.md#p0 as s1'
+    good = (
+        'assert supplier {name: "VoltaChem", country: "DE"} source doc:new.md#p0 as s1'
+    )
     runner = ScriptedRunner([good])
     extract(sess, r.doc_id, runner)
     assert "Stale focus." not in runner.prompts[0]

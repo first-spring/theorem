@@ -368,8 +368,32 @@ alter class supplier add {rating: float}
 rename property supplier.rating to score
 ```
 
-`rename class`, `drop class`, `drop edge`, and `withdraw doc:...` follow the
-same shape; the spec lists each with its rule.
+`rename class` follows the same shape; the spec lists each with its rule.
+
+### Taking a source back, and retiring a model
+
+A source can turn out to be wrong after everything built on it is
+already written. `withdraw` takes the document and every artifact whose
+every bundle cited it, then the cascade. `preview` shows what that would
+be without writing anything:
+
+```theorem
+assert supplier {name: "Kessel Metals", country: "AT"} support [doc:audit-09#p7] as kessel
+withdraw doc:audit-09 reason "the audit was retracted" preview
+withdraw doc:audit-09 reason "the audit was retracted"
+```
+
+A class or an edge type can be wrong too. `drop edge` deletes every edge
+of the type; `drop class` deletes every instance of the class and every
+edge type naming it. Both take the declaration with them, and neither is
+restorable, so a drop is a decision to derive the name again and reload:
+
+```theorem
+derive class certificate from entity with {issued: int}
+derive edge certifies(holder: supplier, granted: certificate)
+drop edge certifies reason "the certificate model did not survive review"
+drop class certificate reason "the certificate model did not survive review"
+```
 
 ## Next
 

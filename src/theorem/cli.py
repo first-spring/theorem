@@ -166,11 +166,18 @@ def _handle_stats(argv: list[str]) -> int:
     store = Store(path, lock=False)
     nodes, edges = len(store.nodes), len(store.edge_index)
     retired = sum(1 for n in store.nodes.values() if n.retired_at is not None)
+    deleted = sum(1 for n in store.nodes.values() if n.deleted_at is not None)
+    # Both are still counted in `nodes`, and neither answers a query, so a
+    # store reads as larger than anything it can serve without saying so.
+    marks = [
+        f"{n:,} {word}" for n, word in ((retired, "retired"), (deleted, "deleted")) if n
+    ]
+    marked = f" ({', '.join(marks)})" if marks else ""
     runs = sorted(path.glob("runs/run-*.json"))
     on_disk = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
     print(f"store: {path}")
-    print(f"  nodes:     {nodes:>12,}{f' ({retired:,} retired)' if retired else ''}")
+    print(f"  nodes:     {nodes:>12,}{marked}")
     print(f"  edges:     {edges:>12,}")
     print(f"  classes:   {len(store.by_class):>12,}")
     print(f"  position:  {store.position:>12,}")

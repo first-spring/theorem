@@ -69,7 +69,18 @@ def test_every_verb_is_in_the_spec(verb):
 
 @pytest.mark.parametrize(
     "clause",
-    ["upto", "or none", "via.", "return distinct", "keep", "support", "preview"],
+    [
+        "upto",
+        "or none",
+        "via.",
+        "return distinct",
+        "keep",
+        "support",
+        "preview",
+        "withdraw",
+        "drop class",
+        "drop edge",
+    ],
 )
 def test_the_added_clauses_are_in_the_tutorial(clause):
     """The spec is normative; the tutorial is how anyone finds a feature."""

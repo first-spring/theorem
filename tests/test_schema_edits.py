@@ -1,6 +1,6 @@
 import pytest
 
-from theorem.schema import ClassDef, EdgeDef, Schema
+from theorem.schema import ClassDef, Schema
 from theorem.session import Session
 
 
@@ -39,11 +39,45 @@ def test_lineage_kinds_replay_in_order_on_reopen(tmp_path):
     s1 = Session(db, Schema())
     s1.execute("derive class product from entity with {price: float}")
     s1.execute('assert product {name: "A", price: 3.5} as a')
-    s1.store.apply({"op": "lineage", "kind": "rename_class", "name": "product", "to": "tool"})
-    s1.store.apply({"op": "lineage", "kind": "rename_prop", "cls": "tool", "name": "price", "to": "cost"})
-    s1.store.apply({"op": "lineage", "kind": "alter_class", "cls": "tool", "action": "add", "decls": {"watts": "int"}})
-    s1.store.apply({"op": "lineage", "kind": "alter_class", "cls": "tool", "action": "retype", "decls": {"cost": "str"}})
-    s1.store.apply({"op": "lineage", "kind": "alter_class", "cls": "tool", "action": "drop", "names": ["watts"]})
+    s1.store.apply(
+        {"op": "lineage", "kind": "rename_class", "name": "product", "to": "tool"}
+    )
+    s1.store.apply(
+        {
+            "op": "lineage",
+            "kind": "rename_prop",
+            "cls": "tool",
+            "name": "price",
+            "to": "cost",
+        }
+    )
+    s1.store.apply(
+        {
+            "op": "lineage",
+            "kind": "alter_class",
+            "cls": "tool",
+            "action": "add",
+            "decls": {"watts": "int"},
+        }
+    )
+    s1.store.apply(
+        {
+            "op": "lineage",
+            "kind": "alter_class",
+            "cls": "tool",
+            "action": "retype",
+            "decls": {"cost": "str"},
+        }
+    )
+    s1.store.apply(
+        {
+            "op": "lineage",
+            "kind": "alter_class",
+            "cls": "tool",
+            "action": "drop",
+            "names": ["watts"],
+        }
+    )
     a = s1.store.by_name[("tool", "a")][0]
     assert s1.store.nodes[a].cls == "tool"
     assert s1.store.nodes[a].props == {"name": "A", "cost": "3.5"}
@@ -60,7 +94,16 @@ def test_a_dropped_class_can_be_derived_again(tmp_path):
     db = tmp_path / "db"
     s1 = Session(db, Schema())
     s1.execute("derive class tag from entity with {}")
-    s1.store.apply({"op": "lineage", "kind": "drop_class", "name": "tag", "reason": "", "cascade": [], "edge_types": []})
+    s1.store.apply(
+        {
+            "op": "lineage",
+            "kind": "drop_class",
+            "name": "tag",
+            "reason": "",
+            "cascade": [],
+            "edge_types": [],
+        }
+    )
     s1.close()
     s2 = Session(db, Schema())
     assert "tag" not in s2.schema.classes
@@ -76,8 +119,18 @@ def test_schema_edits_survive_a_snapshot_then_reopen(tmp_path):
     s1 = Session(db, Schema())
     s1.execute("derive class product from entity with {price: float}")
     s1.execute('assert product {name: "A", price: 3.5} as a')
-    s1.store.apply({"op": "lineage", "kind": "rename_class", "name": "product", "to": "tool"})
-    s1.store.apply({"op": "lineage", "kind": "alter_class", "cls": "tool", "action": "retype", "decls": {"price": "str"}})
+    s1.store.apply(
+        {"op": "lineage", "kind": "rename_class", "name": "product", "to": "tool"}
+    )
+    s1.store.apply(
+        {
+            "op": "lineage",
+            "kind": "alter_class",
+            "cls": "tool",
+            "action": "retype",
+            "decls": {"price": "str"},
+        }
+    )
     s1.store.snapshot()
     s1.close()
     s2 = Session(db, Schema())
@@ -90,6 +143,7 @@ def test_schema_edits_survive_a_snapshot_then_reopen(tmp_path):
     assert s3.rows("find tool as t\nreturn t.price") == [["3.5"]]
     s3.close()
 
+
 def test_rename_class_keeps_ids_bases_and_edges(tmp_path):
     from theorem.canonical import canonical
 
@@ -101,7 +155,9 @@ def test_rename_class_keeps_ids_bases_and_edges(tmp_path):
     out = s.execute("rename class product to tool")
     assert "receipt: renamed class product to tool" in out
     assert s.rows("find tool as t\nreturn t.name") == [["Saw"]]
-    assert s.rows("find part as b\nfollow b uses whole as t\nreturn t.name") == [["Saw"]]
+    assert s.rows("find part as b\nfollow b uses whole as t\nreturn t.name") == [
+        ["Saw"]
+    ]
     assert s.store.by_name[("tool", "saw")] == ["#p-1"]
     assert s.run("find product as p\nreturn p.name").startswith("error")
     s.close()
@@ -134,7 +190,9 @@ def test_renames_survive_restart(tmp_path):
     db = tmp_path / "db"
     s1 = Session(db, Schema.supply_chain())
     s1.execute('assert supplier {name: "A", country: "DE"} as a')
-    s1.execute("rename class supplier to vendor\nrename property vendor.country to nation")
+    s1.execute(
+        "rename class supplier to vendor\nrename property vendor.country to nation"
+    )
     s1.close()
     s2 = Session(db, Schema.supply_chain())
     assert s2.rows("find vendor as v\nreturn v.nation") == [["DE"]]
@@ -144,13 +202,17 @@ def test_renames_survive_restart(tmp_path):
 def test_alter_add_then_set(tmp_path):
     from theorem.canonical import canonical
 
-    assert canonical("alter class supplier add {rating: float}") == "alter class supplier add {rating: float}"
+    assert (
+        canonical("alter class supplier add {rating: float}")
+        == "alter class supplier add {rating: float}"
+    )
     s = Session(tmp_path / "db", Schema.supply_chain())
     s.execute('assert supplier {name: "A"} as a')
     s.execute("alter class supplier add {rating: float}\nset a {rating: 4.5}")
     assert s.rows("find supplier as x\nreturn x.rating") == [[4.5]]
     assert "already exists" in s.run("alter class supplier add {name: str}")
     s.close()
+
 
 def test_alter_drop_removes_values(tmp_path):
     s = Session(tmp_path / "db", Schema.supply_chain())
@@ -161,8 +223,11 @@ def test_alter_drop_removes_values(tmp_path):
     # dropping name is rejected before it ever reaches own_prop's base-class
     # check: supplier declares name itself, so the guard is the explicit
     # "nodes are indexed by it" one, not a base-class message
-    assert "name cannot be dropped; nodes are indexed by it" in s.run("alter class supplier drop {name}")
+    assert "name cannot be dropped; nodes are indexed by it" in s.run(
+        "alter class supplier drop {name}"
+    )
     s.close()
+
 
 def test_alter_retype_converts_or_refuses_naming_offenders(tmp_path):
     s = Session(tmp_path / "db", Schema.supply_chain())
@@ -177,19 +242,26 @@ def test_alter_retype_converts_or_refuses_naming_offenders(tmp_path):
     assert "cannot convert" in out and "#s-2" in out and "committed" not in out
     s.execute('set b {country: "7"}')
     s.execute("alter class supplier retype {country: int}")
-    assert s.rows("find supplier as x\nreturn x.name, x.country order by x.name") == [["A", 12], ["B", 7]]
+    assert s.rows("find supplier as x\nreturn x.name, x.country order by x.name") == [
+        ["A", 12],
+        ["B", 7],
+    ]
     s.close()
+
 
 def test_alters_survive_restart(tmp_path):
     db = tmp_path / "db"
     s1 = Session(db, Schema.supply_chain())
     s1.execute('assert supplier {name: "A", country: "7"} as a')
-    s1.execute("alter class supplier add {rating: float}\nalter class supplier retype {country: int}\nalter class supplier drop {rating}")
+    s1.execute(
+        "alter class supplier add {rating: float}\nalter class supplier retype {country: int}\nalter class supplier drop {rating}"
+    )
     s1.close()
     s2 = Session(db, Schema.supply_chain())
     assert s2.schema.classes["supplier"].props == {"name": "str", "country": "int"}
     assert s2.rows("find supplier as x\nreturn x.country") == [[7]]
     s2.close()
+
 
 def test_drop_class_takes_nodes_edges_and_edge_types(tmp_path):
     s = Session(tmp_path / "db", Schema.supply_chain())
@@ -207,6 +279,7 @@ def test_drop_class_takes_nodes_edges_and_edge_types(tmp_path):
     assert s.rows("find part as b\nreturn b.name") == [["blade"]]
     s.close()
 
+
 def test_drop_class_refuses_builtins_and_parents(tmp_path):
     s = Session(tmp_path / "db", Schema.supply_chain())
     assert "built-in" in s.run('drop class entity reason "x"')
@@ -214,23 +287,30 @@ def test_drop_class_refuses_builtins_and_parents(tmp_path):
     assert "subclasses" in s.run('drop class product reason "x"')
     s.close()
 
+
 def test_drop_edge_type(tmp_path):
     s = Session(tmp_path / "db", Schema.supply_chain())
     s.execute('assert product {name: "Saw"} as p')
     s.execute('assert part {name: "blade"} as b')
     s.execute("assert edge uses(whole: p, component: b)")
     out = s.execute('drop edge uses reason "wrong model"')
-    assert "receipt: dropped edge uses at @t-" in out and "cascade: 0 nodes, 1 edges" in out
+    assert (
+        "receipt: dropped edge uses at @t-" in out
+        and "cascade: 0 nodes, 1 edges" in out
+    )
     assert "uses" not in s.schema.edges
     assert s.rows("find product as p\nreturn p.name") == [["Saw"]]
     s.close()
+
 
 def test_drops_survive_restart_and_a_dropped_name_can_return(tmp_path):
     db = tmp_path / "db"
     s1 = Session(db, Schema())
     s1.execute("derive class tag from entity with {}")
     s1.execute('assert tag {name: "old"} as t')
-    s1.execute('drop class tag reason "replace"\nderive class tag from entity with {colour: str}')
+    s1.execute(
+        'drop class tag reason "replace"\nderive class tag from entity with {colour: str}'
+    )
     s1.close()
     s2 = Session(db, Schema())
     assert s2.schema.classes["tag"].props == {"colour": "str"}
@@ -265,3 +345,29 @@ def test_a_lineage_record_missing_what_replay_reads_is_refused(tmp_path, record)
     assert store.position == before
     assert store.wal_len() == before
     store.close()
+
+
+def test_renaming_into_a_dropped_class_name_keeps_the_residual_nodes(tmp_path):
+    """A dropped class leaves its tombstoned nodes in its by_class bucket.
+    Renaming another class onto that name must join the bucket, not replace
+    it, or the residue stops being reachable by any later class edit."""
+    s = Session(tmp_path / "db", Schema())
+    s.execute("derive class tag from entity with {}")
+    s.execute('assert tag {name: "old"} as t')
+    old = s.store.by_name[("tag", "old")][0]
+    s.execute('drop class tag reason "replace"')
+    s.execute("derive class label from entity with {}")
+    s.execute('assert label {name: "new"} as la')
+    new = s.store.by_name[("label", "new")][0]
+    s.execute("rename class label to tag")
+    assert sorted(s.store.by_class["tag"]) == sorted([old, new])
+    s.close()
+
+
+def test_the_rename_receipt_counts_only_live_nodes(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "A"} as a\nassert supplier {name: "B"} as b')
+    s.execute('delete #s-1 reason "gone"')
+    out = s.execute("rename class supplier to vendor")
+    assert "1 nodes keep their ids" in out
+    s.close()

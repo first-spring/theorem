@@ -110,10 +110,7 @@ CLAUSE_HOME = {
         "a trailing clause of delete, withdraw, drop class, drop edge: "
         "computes the cascade and writes nothing"
     ),
-    "reason": (
-        "a clause of retire, flag, delete, withdraw, drop: "
-        '`... reason "why"`'
-    ),
+    "reason": ('a clause of retire, flag, delete, withdraw, drop: `... reason "why"`'),
 }
 
 
@@ -467,8 +464,10 @@ class _Parser:
                 self.next()
                 continue
             break
-        if len(bundles) > 8:
-            raise ParseError(self.line_no, "a receipt holds at most 8 bundles")
+        # No ceiling here: the spec caps a receipt at its eight smallest
+        # bundles, it does not refuse a ninth. Refusing turned an honest
+        # extra citation into a parse error. `storage.cap_bundles` applies
+        # the cap where the receipt is stored.
         return bundles
 
     def preview_opt(self) -> bool:
@@ -774,7 +773,9 @@ class _Parser:
     def parse_withdraw(self) -> Withdraw:
         t = self.next()
         if t[0] != "provenance":
-            raise ParseError(self.line_no, f"expected a doc:/attach: source, got {t[1]!r}")
+            raise ParseError(
+                self.line_no, f"expected a doc:/attach: source, got {t[1]!r}"
+            )
         source = t[1].split("#", 1)[0]
         self.expect_word("reason")
         reason = self.string()
@@ -783,7 +784,9 @@ class _Parser:
     def parse_restore(self) -> Restore:
         t = self.next()
         if t[0] != "position":
-            raise ParseError(self.line_no, f"expected a position such as @t-42, got {t[1]!r}")
+            raise ParseError(
+                self.line_no, f"expected a position such as @t-42, got {t[1]!r}"
+            )
         return Restore(int(t[1][3:]))
 
     def parse_derive(self) -> Stmt:
@@ -865,7 +868,9 @@ class _Parser:
             return AlterClass(cls, action, names=names)
         decls = self.propdecls()
         if not decls:
-            raise ParseError(self.line_no, f"alter class {cls} {action} needs at least one property")
+            raise ParseError(
+                self.line_no, f"alter class {cls} {action} needs at least one property"
+            )
         return AlterClass(cls, action, decls=decls)
 
     def parse_drop(self) -> Stmt:
@@ -874,7 +879,11 @@ class _Parser:
         self.expect_word("reason")
         reason = self.string()
         preview = self.preview_opt()
-        return DropClass(name, reason, preview) if what == "class" else DropEdge(name, reason, preview)
+        return (
+            DropClass(name, reason, preview)
+            if what == "class"
+            else DropEdge(name, reason, preview)
+        )
 
     def parse_schema(self) -> SchemaStmt:
         return SchemaStmt()

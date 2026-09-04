@@ -125,14 +125,20 @@ def cap_bundles(support: list[list[str]]) -> list[list[str]]:
     Dropping a bundle can only make an artifact look deader than it is,
     never keep it alive on evidence it does not have, so the cap never leaks.
     Stable on length so equal-sized bundles keep their written order.
+
+    Empty bundles go first, and not because they are the smallest: a bundle
+    holding nothing holds nothing dead, so one would make its artifact
+    immortal under every deletion. An artifact with no bundles left is
+    self-supported, which is what an empty receipt already meant.
     """
-    return sorted((list(b) for b in support), key=len)[:MAX_BUNDLES]
+    return sorted((list(b) for b in support if b), key=len)[:MAX_BUNDLES]
 
 
 def _check_cascade(record: dict) -> None:
     cascade = record.get("cascade")
     if not isinstance(cascade, list) or not all(
-        isinstance(m, list) and len(m) == 2 and m[0] in ("node", "edge") for m in cascade
+        isinstance(m, list) and len(m) == 2 and m[0] in ("node", "edge")
+        for m in cascade
     ):
         raise StoreError(f"{record['op']}: cascade must be a list of [kind, id]")
 
@@ -456,7 +462,9 @@ class Store:
                 if not isinstance(unset, list) or not all(
                     isinstance(name, str) for name in unset
                 ):
-                    raise StoreError("patch_node: unset must be a list of property names")
+                    raise StoreError(
+                        "patch_node: unset must be a list of property names"
+                    )
                 _check_support(record)
         elif op == "retire_edge":
             if record.get("id") not in self.edge_index:
@@ -470,7 +478,9 @@ class Store:
         elif op == "delete":
             art = self._live_artifact(record.get("id"), record.get("kind"))
             if art is None:
-                raise StoreError(f"delete: no live {record.get('kind')} {record.get('id')!r}")
+                raise StoreError(
+                    f"delete: no live {record.get('kind')} {record.get('id')!r}"
+                )
             _check_cascade(record)
         elif op == "withdraw":
             if not isinstance(record.get("source"), str) or not record["source"]:
@@ -630,7 +640,9 @@ class Store:
                 }
             )
         for rec in self.lineage:
-            records.append({**rec, "op": "lineage", "_applied": True, "_pos": rec.get("_pos", 0)})
+            records.append(
+                {**rec, "op": "lineage", "_applied": True, "_pos": rec.get("_pos", 0)}
+            )
         for pair in self.distinct_pairs:
             if len(pair) != 2:  # defensive: self-pairs collapse to one element
                 continue
@@ -644,7 +656,13 @@ class Store:
             )
         for pos, source in self.withdrawn.items():
             records.append(
-                {"op": "withdraw", "source": source, "reason": "", "cascade": [], "_pos": pos}
+                {
+                    "op": "withdraw",
+                    "source": source,
+                    "reason": "",
+                    "cascade": [],
+                    "_pos": pos,
+                }
             )
         run_path = self.path / "runs" / f"run-{self.position}.json"
         # write-then-rename so a crash mid-write never leaves a torn run file
@@ -831,22 +849,30 @@ class Store:
         if kind == "rename_class":
             old, new = rec["name"], rec["to"]
             self.subclass_of = {
-                (new if c == old else c): (new if p == old else p) for c, p in self.subclass_of.items()
+                (new if c == old else c): (new if p == old else p)
+                for c, p in self.subclass_of.items()
             }
         if rec.get("_applied"):
             return
         if kind == "rename_class":
             old, new = rec["name"], rec["to"]
             ids = self.by_class.pop(old, [])
-            self.by_class[new] = ids
+            # Extend, never overwrite: a class dropped under this name left
+            # its tombstoned nodes in the bucket, and replacing it would put
+            # them beyond the reach of every later edit to the class.
+            self.by_class.setdefault(new, []).extend(ids)
             for nid in ids:
                 node = self.nodes[nid]
                 self._deindex_name(node)
                 self._deindex_props(node)
                 node.cls = new
                 self._index_name(node)
-            self.indexed_props = {(new if c == old else c, p) for c, p in self.indexed_props}
-            self.by_prop = {(new if c == old else c, p): v for (c, p), v in self.by_prop.items()}
+            self.indexed_props = {
+                (new if c == old else c, p) for c, p in self.indexed_props
+            }
+            self.by_prop = {
+                (new if c == old else c, p): v for (c, p), v in self.by_prop.items()
+            }
             for nid in ids:
                 self._index_props(self.nodes[nid])
         elif kind == "rename_prop":
@@ -874,7 +900,9 @@ class Store:
                     for name, typ in rec["decls"].items():
                         if name in node.props:
                             try:
-                                node.props[name] = self.retype_value(node.props[name], typ)
+                                node.props[name] = self.retype_value(
+                                    node.props[name], typ
+                                )
                             except (ValueError, TypeError):
                                 # The writer preflights every node, so this
                                 # only happens on a record from an older
@@ -883,7 +911,11 @@ class Store:
                     self._index_props(node)
         elif kind in ("drop_class", "drop_edge"):
             for k, art_id in rec.get("cascade", []):
-                art = self.nodes.get(art_id) if k == "node" else self.edge_index.get(art_id)
+                art = (
+                    self.nodes.get(art_id)
+                    if k == "node"
+                    else self.edge_index.get(art_id)
+                )
                 if art is not None:
                     art.deleted_at = pos
                     art.deleted_by = pos
@@ -905,7 +937,11 @@ class Store:
             return
         if op in ("delete", "withdraw"):
             for kind, art_id in rec.get("cascade", []):
-                art = self.nodes.get(art_id) if kind == "node" else self.edge_index.get(art_id)
+                art = (
+                    self.nodes.get(art_id)
+                    if kind == "node"
+                    else self.edge_index.get(art_id)
+                )
                 if art is None:
                     continue
                 art.deleted_at = pos
