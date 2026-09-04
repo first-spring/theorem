@@ -89,3 +89,53 @@ def test_schema_edits_survive_a_snapshot_then_reopen(tmp_path):
     s3 = Session(db, Schema())
     assert s3.rows("find tool as t\nreturn t.price") == [["3.5"]]
     s3.close()
+
+def test_rename_class_keeps_ids_bases_and_edges(tmp_path):
+    from theorem.canonical import canonical
+
+    assert canonical("rename class product to tool") == "rename class product to tool"
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert product {name: "Saw", launch_year: 2024} as p')
+    s.execute('assert part {name: "blade"} as b')
+    s.execute("assert edge uses(whole: p, component: b)")
+    out = s.execute("rename class product to tool")
+    assert "receipt: renamed class product to tool" in out
+    assert s.rows("find tool as t\nreturn t.name") == [["Saw"]]
+    assert s.rows("find part as b\nfollow b uses whole as t\nreturn t.name") == [["Saw"]]
+    assert s.store.by_name[("tool", "saw")] == ["#p-1"]
+    assert s.run("find product as p\nreturn p.name").startswith("error")
+    s.close()
+
+
+def test_rename_class_is_verified(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    assert "already exists" in s.run("rename class product to part")
+    assert "unknown class" in s.run("rename class widget to tool")
+    assert "reserved" in s.run("rename class product to nodes")
+    assert "lowercase" in s.run("rename class product to Tool")
+    s.close()
+
+
+def test_rename_property(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "A", country: "DE"} as a')
+    s.execute("rename property supplier.country to nation")
+    assert s.rows("find supplier as x\nreturn x.nation") == [["DE"]]
+    assert "unknown property" in s.run("find supplier as x\nreturn x.country")
+    # supplier declares name itself in the demo schema, so use a subclass to
+    # reach an inherited property
+    s.execute("derive class vendor from supplier with {tier: int}")
+    out = s.run("rename property vendor.nation to region")
+    assert "declared on base class supplier" in out
+    s.close()
+
+
+def test_renames_survive_restart(tmp_path):
+    db = tmp_path / "db"
+    s1 = Session(db, Schema.supply_chain())
+    s1.execute('assert supplier {name: "A", country: "DE"} as a')
+    s1.execute("rename class supplier to vendor\nrename property vendor.country to nation")
+    s1.close()
+    s2 = Session(db, Schema.supply_chain())
+    assert s2.rows("find vendor as v\nreturn v.nation") == [["DE"]]
+    s2.close()

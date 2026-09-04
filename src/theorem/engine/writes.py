@@ -21,6 +21,8 @@ from ..ast_nodes import (
     Flag,
     Merge,
     Refine,
+    RenameClass,
+    RenameProp,
     Restore,
     Retire,
     SetProps,
@@ -690,6 +692,21 @@ def _derive_edge(stmt: DeriveEdge, ctx: WriteContext) -> Receipt:
     return Receipt([f"receipt: edge {stmt.name} declared at @t-{pos}"])
 
 
+def _rename_class(stmt: RenameClass, ctx: WriteContext) -> Receipt:
+    # durable record FIRST, matching _derive: the live schema must not move
+    # a class that would silently vanish on restart
+    pos = ctx.store.apply({"op": "lineage", "kind": "rename_class", "name": stmt.name, "to": stmt.to})
+    ctx.schema.rename_class(stmt.name, stmt.to)
+    count = len(ctx.store.by_class.get(stmt.to, []))
+    return Receipt([f"receipt: renamed class {stmt.name} to {stmt.to} at @t-{pos}", f"  {count} nodes keep their ids"])
+
+def _rename_prop(stmt: RenameProp, ctx: WriteContext) -> Receipt:
+    pos = ctx.store.apply(
+        {"op": "lineage", "kind": "rename_prop", "cls": stmt.cls, "name": stmt.name, "to": stmt.to}
+    )
+    ctx.schema.rename_prop(stmt.cls, stmt.name, stmt.to)
+    return Receipt([f"receipt: renamed property {stmt.cls}.{stmt.name} to {stmt.to} at @t-{pos}"])
+
 def deprecate_class(session, name: str) -> str:
     cdef = session.schema.classes[name]
     pos = session.store.apply(
@@ -729,5 +746,9 @@ def execute_write(stmt: Stmt, ctx: WriteContext) -> Receipt:
             return _derive(stmt, ctx)
         case DeriveEdge():
             return _derive_edge(stmt, ctx)
+        case RenameClass():
+            return _rename_class(stmt, ctx)
+        case RenameProp():
+            return _rename_prop(stmt, ctx)
         case _:
             raise WriteError(f"not a write statement: {type(stmt).__name__}")

@@ -39,6 +39,8 @@ from .ast_nodes import (
     Merge,
     Or,
     Refine,
+    RenameClass,
+    RenameProp,
     Restore,
     Retire,
     Return,
@@ -212,4 +214,8 @@ def render_stmt(stmt: Stmt) -> str:
         case DeriveEdge(name=n, roles=roles):
             args = ", ".join(f"{r}: {c}" for r, c in roles.items())
             return f"derive edge {n}({args})"
+        case RenameClass(name=n, to=to):
+            return f"rename class {n} to {to}"
+        case RenameProp(cls=cls, name=n, to=to):
+            return f"rename property {cls}.{n} to {to}"
     raise CanonicalError(f"cannot render {type(stmt).__name__}")

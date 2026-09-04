@@ -34,7 +34,7 @@ or          := "or"                                   ; alone on its line
 
 write_stmt  := assert_node | assert_edge | merge | distinct_s | refine
              | compact | retire | flag | set_stmt | delete | withdraw
-             | restore | derive
+             | restore | derive | rename
 assert_node := "assert" CLASSNAME props [support] "as" NAME
 assert_edge := "assert" "edge" EDGENAME "(" ROLENAME ":" ref ","
                ROLENAME ":" ref ")" [support]
@@ -56,6 +56,8 @@ derive      := "derive" "class" NAME "from" CLASSNAME "with" propdecls
                  ["quota" INT] ["dedup" NUMBER]
              | "derive" "edge" EDGENAME "(" ROLENAME ":" CLASSNAME ","
                  ROLENAME ":" CLASSNAME ")"
+rename      := "rename" "class" NAME "to" NAME
+             | "rename" "property" NAME "." NAME "to" NAME
 
 util_stmt   := "schema"
 
@@ -136,6 +138,8 @@ Every write returns a **receipt**: created and changed ids, position `@t-N`, the
 - **restore @t-N**: reverses the deletion or withdrawal committed at position N, restoring exactly the artifacts it tombstoned. Refuses when nothing carries that position. Drops of classes and edge types are not restorable.
 - **derive class name from base with {...}**: creates a provisional subclass with an instance quota (500 in v0, `quota N` to change it; `dedup R` sets the class's dup threshold). Status is queryable via `find class`.
 - **derive edge name(role: class, role: class)**: declares an edge type at runtime, with exactly two roles. Both survive a restart: the derivation is a lineage record, and a session rebuilds the schema entries a previous process created.
+- **rename class a to b**: in place. Nodes keep their ids (the id letter is cosmetic; new nodes take the new letter), subclasses keep their base, edge roles follow. Refuses an existing, reserved, or malformed name.
+- **rename property c.a to b**: in place on every node of the class and its subclasses. Only a property the class declares itself; the error names the base class otherwise.
 
 ## Dedup
 

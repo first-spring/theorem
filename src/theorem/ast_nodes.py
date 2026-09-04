@@ -197,5 +197,18 @@ class DeriveEdge(Stmt):
 
 
 @dataclass
+class RenameClass(Stmt):
+    name: str
+    to: str
+
+
+@dataclass
+class RenameProp(Stmt):
+    cls: str
+    name: str
+    to: str
+
+
+@dataclass
 class SchemaStmt(Stmt):
     pass

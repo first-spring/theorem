@@ -31,6 +31,8 @@ from .ast_nodes import (
     Merge,
     Or,
     Refine,
+    RenameClass,
+    RenameProp,
     Restore,
     Retire,
     Return,
@@ -829,6 +831,19 @@ class _Parser:
                     )
                 dedup = value
         return DeriveClass(name, base, props, quota=quota, dedup=dedup)
+
+    def parse_rename(self) -> Stmt:
+        what = self.expect_word("class", "property")
+        if what == "class":
+            name = self.expect_name()
+            self.expect_word("to")
+            return RenameClass(name, self.expect_name())
+        w = self.expect_word()
+        if w.count(".") != 1:
+            raise ParseError(self.line_no, f"expected class.property, got {w!r}")
+        cls, prop = w.split(".")
+        self.expect_word("to")
+        return RenameProp(cls, prop, self.expect_name())
 
     def parse_schema(self) -> SchemaStmt:
         return SchemaStmt()

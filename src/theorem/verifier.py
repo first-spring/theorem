@@ -32,6 +32,8 @@ from .ast_nodes import (
     Merge,
     Or,
     Refine,
+    RenameClass,
+    RenameProp,
     Restore,
     Retire,
     Return,
@@ -129,6 +131,18 @@ def _check_class(schema: Schema, name: str, line: int) -> None:
         raise VerifyError(
             line, f'unknown class "{name}".{_suggest(name, schema.classes)}'
         )
+
+
+def _check_new_class_name(schema: Schema, name: str, line: int) -> None:
+    if name in schema.classes:
+        raise VerifyError(line, f'class "{name}" already exists')
+    if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
+        raise VerifyError(
+            line,
+            f'class name "{name}" must be a lowercase identifier (node ids derive from it)',
+        )
+    if name in SPECIAL_TARGETS:
+        raise VerifyError(line, f'"{name}" is a reserved find target and cannot be a class')
 
 
 def _check_cond(
@@ -492,18 +506,7 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
                     line,
                     f'unknown base class "{base}".{_suggest(base, schema.classes)}',
                 )
-            if name in schema.classes:
-                raise VerifyError(line, f'class "{name}" already exists')
-            if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
-                raise VerifyError(
-                    line,
-                    f'class name "{name}" must be a lowercase identifier '
-                    "(node ids derive from it)",
-                )
-            if name in SPECIAL_TARGETS:
-                raise VerifyError(
-                    line, f'"{name}" is a reserved find target and cannot be a class'
-                )
+            _check_new_class_name(schema, name, line)
             # stage into the verify-time schema copy so later statements in
             # this program can use the class; execution re-derives it live
             from .schema import ClassDef
@@ -533,6 +536,30 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
                     )
             # stage into the verify-time schema copy, like DeriveClass
             schema.edges[name] = EdgeDef(name, dict(roles))
+
+        case RenameClass(name=name, to=to):
+            _check_class(schema, name, line)
+            _check_new_class_name(schema, to, line)
+            schema.rename_class(name, to)  # staged for later lines
+            for k, v in list(env.items()):
+                if v.removeprefix("prior:") == name:
+                    env[k] = v.replace(name, to)
+
+        case RenameProp(cls=cls, name=name, to=to):
+            _check_class(schema, cls, line)
+            try:
+                schema.own_prop(cls, name)
+            except KeyError:
+                raise VerifyError(
+                    line, f'unknown property "{name}" on class {cls}.{_suggest(name, schema.all_props(cls))}'
+                )
+            except ValueError as e:
+                raise VerifyError(line, str(e))
+            if to in schema.all_props(cls):
+                raise VerifyError(line, f'property "{to}" already exists on class {cls}')
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", to):
+                raise VerifyError(line, f'property name "{to}" must be a lowercase identifier')
+            schema.rename_prop(cls, name, to)
 
         case SchemaStmt():
             pass
