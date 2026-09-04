@@ -37,6 +37,8 @@ assert supplier {name: "VoltaChem", country: "DE"} as volta
 
 Every write returns a **receipt**: the created id, its position `@t-N`, the guards that ran, and any duplicate candidates found at write time. Bindings (`pb`, `cell`, `volta`) stay usable as write arguments for the rest of the session.
 
+An `assert` can also carry `support`, the evidence the artifact rests on; section 15 covers it.
+
 ## 3. Connect them with edges
 
 ```theorem
@@ -335,6 +337,39 @@ distinct v2, volta reason "different legal entities"
 find nodes where health.loss > 0.8 as sick
 return sick.id, sick.health
 ```
+
+### Receipts, and taking things back
+
+Every write can say what it rests on. A receipt is one or more bundles of
+evidence, each enough on its own:
+
+```theorem
+assert supplier {name: "Ionix Cells"} support [doc:report-08/p1] or [doc:audit-09/p4] as ic
+```
+
+Delete something and everything only it supported goes with it. `preview`
+shows the cascade without writing; `restore` reverses a deletion by its
+position:
+
+```theorem
+delete ic reason "duplicate of Ionix" preview
+```
+
+Edit a value in place, or take a property away:
+
+```theorem
+set ic {country: "KR"}
+```
+
+The schema moves too, in place, with ids unchanged:
+
+```theorem
+alter class supplier add {rating: float}
+rename property supplier.rating to score
+```
+
+`rename class`, `drop class`, `drop edge`, and `withdraw doc:...` follow the
+same shape; the spec lists each with its rule.
 
 ## Next
 

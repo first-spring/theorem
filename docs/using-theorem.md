@@ -16,7 +16,7 @@ pip install theoremql
 Pin it if you want the language and the storage format to hold still:
 
 ```bash
-pip install "theoremql==0.3.1"
+pip install "theoremql==0.4.0"
 ```
 
 Optional extras add document ingest: `[pdf]` for PDFs, `[office]` for

@@ -4,6 +4,30 @@ Versions follow the 0.x line: the language surface in
 [docs/language-spec.md](docs/language-spec.md) is what the benchmarks pin
 and is the least likely thing to move; everything else may.
 
+## 0.4.0
+
+### Added
+
+- **Receipts.** `support [..] or [..]` on `assert` and `compact`: the
+  artifact's evidence, as alternative bundles each sufficient on its own.
+  `source doc:x` is now shorthand for one bundle. Loaded rows cite their
+  file and line. Merge survivors inherit both receipts; refine children
+  cite their blob.
+- **Deletion that follows receipts.** `delete`, `delete edge`, and
+  `withdraw doc:...` tombstone an artifact and everything its removal
+  leaves unsupported, in one record. `preview` reports the cascade
+  without writing. `restore @t-N` reverses one deletion whole. Reads skip
+  tombstoned artifacts the way they skip retired ones.
+- **`set`**: edit property values on a node; `none` removes one.
+- **Schema evolution in place.** `rename class`, `rename property`,
+  `alter class add | drop | retype`, `drop class`, `drop edge`. All are
+  lineage records replayed in order on reopen; node ids do not change.
+
+### Changed
+
+- Lineage is replayed in position order. `derive class` of a name that a
+  later `drop class` removed is re-created, so a dropped name can return.
+
 ## 0.3.1
 
 First version on PyPI: https://pypi.org/project/theoremql/

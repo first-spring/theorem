@@ -1,6 +1,6 @@
 [project]
 name = "theoremql"
-version = "0.3.1"
+version = "0.4.0"
 description = "A graph query and construction language for AI agents. Every query verified whole before it runs."
 readme = "README.md"
 license = "Apache-2.0"
