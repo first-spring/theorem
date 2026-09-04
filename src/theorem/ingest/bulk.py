@@ -145,6 +145,7 @@ def _endpoint(store, schema, cls: str, value: str, line: int) -> str:
             raise LoadError(f"line {line}: no node {value}")
         return resolved
     ids = store.by_name.get((cls, fold(value)), [])
+    ids = [i for i in ids if store.nodes[store.resolve(i)].live]
     if not ids:
         raise LoadError(f"line {line}: no {cls} named {value!r}")
     if len({store.resolve(i) for i in ids}) > 1:

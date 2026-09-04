@@ -129,6 +129,14 @@ def cap_bundles(support: list[list[str]]) -> list[list[str]]:
     return sorted((list(b) for b in support), key=len)[:MAX_BUNDLES]
 
 
+def _check_cascade(record: dict) -> None:
+    cascade = record.get("cascade")
+    if not isinstance(cascade, list) or not all(
+        isinstance(m, list) and len(m) == 2 and m[0] in ("node", "edge") for m in cascade
+    ):
+        raise StoreError(f"{record['op']}: cascade must be a list of [kind, id]")
+
+
 def _check_support(record: dict) -> None:
     support = record.get("support")
     if support is None:
@@ -202,6 +210,10 @@ class Store:
         self.dependents: dict[str, set[str]] = {}
         # document name -> artifacts citing any anchor of it. What withdraw seeds.
         self.sources: dict[str, set[str]] = {}
+        # deletion position -> withdrawn document name
+        self.withdrawn: dict[int, str] = {}
+        # positions of drop_class/drop_edge lineage records; restore refuses them
+        self.drops: set[int] = set()
         self.id_counters: dict[str, int] = {}
         self.position = 0
         try:
@@ -385,6 +397,8 @@ class Store:
         self.aliases = {}
         self.dependents = {}
         self.sources = {}
+        self.withdrawn = {}
+        self.drops = set()
         self.id_counters = {}
         self.position = 0
         self._wal_records = 0
@@ -404,6 +418,41 @@ class Store:
             _check_support(record)
         elif op == "put_edge":
             _check_support(record)
+        elif op == "delete":
+            art = self._live_artifact(record.get("id"), record.get("kind"))
+            if art is None:
+                raise StoreError(f"delete: no live {record.get('kind')} {record.get('id')!r}")
+            _check_cascade(record)
+        elif op == "withdraw":
+            if not isinstance(record.get("source"), str) or not record["source"]:
+                raise StoreError("withdraw: source must be a document name")
+            _check_cascade(record)
+        elif op == "restore":
+            of = record.get("of")
+            if of in self.drops:
+                raise StoreError(
+                    f"restore: @t-{of} dropped a class or edge type; derive it again and reload"
+                )
+            if not isinstance(of, int) or not self._deleted_by(of):
+                raise StoreError(f"restore: nothing was deleted at @t-{of}")
+        elif op == "patch_edge":
+            if record.get("id") not in self.edge_index:
+                raise StoreError(f"patch_edge: unknown edge {record.get('id')!r}")
+            _check_support(record)
+
+    def _live_artifact(self, art_id, kind):
+        if kind == "node":
+            art = self.nodes.get(self.resolve(art_id or ""))
+        elif kind == "edge":
+            art = self.edge_index.get(art_id)
+        else:
+            return None
+        return art if art is not None and art.live else None
+
+    def _deleted_by(self, pos: int) -> list:
+        out = [n for n in self.nodes.values() if n.deleted_by == pos]
+        out += [e for e in self.edge_index.values() if e.deleted_by == pos]
+        return out
 
     def apply(self, record: dict) -> int:
         """Append to WAL, apply to memory, return the new position."""
@@ -530,6 +579,10 @@ class Store:
         for absorbed, survivor in self.aliases.items():
             records.append(
                 {"op": "alias", "absorbed": absorbed, "survivor": survivor, "_pos": 0}
+            )
+        for pos, source in self.withdrawn.items():
+            records.append(
+                {"op": "withdraw", "source": source, "reason": "", "cascade": [], "_pos": pos}
             )
         run_path = self.path / "runs" / f"run-{self.position}.json"
         # write-then-rename so a crash mid-write never leaves a torn run file
@@ -685,6 +738,34 @@ class Store:
             return
         if op == "retire_edge" and rec.get("id") not in self.edge_index:
             return
+        if op == "patch_edge" and rec.get("id") not in self.edge_index:
+            return
+        if op in ("delete", "withdraw"):
+            for kind, art_id in rec.get("cascade", []):
+                art = self.nodes.get(art_id) if kind == "node" else self.edge_index.get(art_id)
+                if art is None:
+                    continue
+                art.deleted_at = pos
+                art.deleted_by = pos
+            if op == "withdraw":
+                self.withdrawn[pos] = rec["source"]
+            return
+        if op == "restore":
+            kept = {art_id: by for _kind, art_id, by in rec.get("kept_dead", [])}
+            for art in self._deleted_by(rec["of"]):
+                if art.id in kept:
+                    art.deleted_by = kept[art.id]  # its evidence is still dead
+                    continue
+                art.deleted_at = None
+                art.deleted_by = None
+            self.withdrawn.pop(rec["of"], None)
+            return
+        if op == "patch_edge":
+            edge = self.edge_index[rec["id"]]
+            self._deindex_support(edge.id, edge.support)
+            edge.support = cap_bundles(rec["support"])
+            self._index_support(edge.id, edge.support)
+            return
         if op == "put_node":
             node = Node(
                 id=rec["id"],
@@ -707,7 +788,9 @@ class Store:
             self._bump_counter(node.cls, node.id)
         elif op == "patch_node":
             node = self.nodes[rec["id"]]
-            if "name" in rec["props"]:
+            unset = rec.get("unset", [])
+            renames_name = "name" in rec["props"] or "name" in unset
+            if renames_name:
                 self._deindex_name(node)
             # Deindex on the old values before they are overwritten, or
             # the entries under them are never removed and the index
@@ -717,12 +800,18 @@ class Store:
                 if k in node.props and node.props[k] != v:
                     node.conflict_count += 1
                 node.props[k] = v
+            for k in unset:
+                node.props.pop(k, None)
             node.last_confirmed = pos
             if "state" in rec:
                 node.state = rec["state"]
-            if "name" in rec["props"]:
+            if renames_name:
                 self._index_name(node)
             self._index_props(node)
+            if "support" in rec:
+                self._deindex_support(node.id, node.support)
+                node.support = cap_bundles(rec["support"])
+                self._index_support(node.id, node.support)
         elif op == "put_edge":
             edge = Edge(
                 id=rec["id"],
@@ -748,6 +837,9 @@ class Store:
             self.edge_index[rec["id"]].retired_at = pos
         elif op == "alias":
             self.aliases[rec["absorbed"]] = rec["survivor"]
+            moved = self.dependents.pop(rec["absorbed"], set())
+            if moved:
+                self.dependents.setdefault(rec["survivor"], set()).update(moved)
         elif op == "lineage":
             self.lineage.append({**rec, "_pos": pos})
         elif op == "distinct":
@@ -783,3 +875,9 @@ class Store:
         from .cascade import compute
 
         return compute(self, nodes=nodes, edges=edges, sources=sources)
+
+    def live_nodes(self):
+        return (n for n in self.nodes.values() if n.live)
+
+    def live_by_class(self, cls: str) -> list[str]:
+        return [nid for nid in self.by_class.get(cls, ()) if self.nodes[nid].live]

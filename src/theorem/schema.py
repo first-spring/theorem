@@ -124,9 +124,12 @@ class Schema:
         """
         populated = None
         if store is not None:
-            populated = {
-                cls for cls, ids in getattr(store, "by_class", {}).items() if ids
-            }
+            live_by_class = getattr(store, "live_by_class", None)
+            by_class = getattr(store, "by_class", {})
+            if live_by_class is not None:
+                populated = {cls for cls in by_class if live_by_class(cls)}
+            else:
+                populated = {cls for cls, ids in by_class.items() if ids}
         lines = ["classes:"]
         for c in self.classes.values():
             if populated is not None and c.name not in populated:

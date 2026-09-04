@@ -69,7 +69,7 @@ def sync_candidates(
     key = block_key(node.cls, node.props.get("name", ""))
     out = []
     for other in store.nodes.values():
-        if other.retired_at is not None or store.resolve(other.id) != other.id:
+        if not other.live or store.resolve(other.id) != other.id:
             continue
         if (
             other.id == node.id

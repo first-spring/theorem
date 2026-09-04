@@ -1,5 +1,3 @@
-import pytest
-
 from theorem.engine.storage import Store
 
 from tests.test_receipts import link, put
@@ -82,7 +80,6 @@ def test_retired_evidence_still_counts(tmp_path):
     assert store.nodes[summary].live
 
 
-@pytest.mark.xfail(strict=True, reason="alias re-keying lands in Task 3")
 def test_a_bundle_citing_an_absorbed_id_follows_the_survivor(tmp_path):
     store = Store(tmp_path)
     a = put(store, "supplier", name="Ionix")
@@ -91,3 +88,141 @@ def test_a_bundle_citing_an_absorbed_id_follows_the_survivor(tmp_path):
     store.apply({"op": "alias", "absorbed": b, "survivor": a})
     store.apply({"op": "retire", "id": b, "reason": f"merged into {a}"})
     assert store.cascade(nodes=[a]).nodes == [a, z]
+
+
+def test_delete_record_tombstones_the_whole_cascade(tmp_path):
+    store = Store(tmp_path)
+    p = put(store, "part", name="cell")
+    s = put(store, "supplier", name="Ionix")
+    e = link(store, "supplied_by", item=p, source=s)
+    out = store.cascade(nodes=[s])
+    pos = store.apply(
+        {"op": "delete", "id": s, "kind": "node", "reason": "test",
+         "cascade": [["node", n] for n in out.nodes] + [["edge", x] for x in out.edges]}
+    )
+    assert store.nodes[s].deleted_at == pos and store.nodes[s].deleted_by == pos
+    assert store.edge_index[e].deleted_by == pos
+    assert store.nodes[p].live is True
+
+
+def test_restore_brings_back_exactly_one_deletion(tmp_path):
+    store = Store(tmp_path)
+    a = put(store, "supplier", name="A")
+    b = put(store, "supplier", name="B")
+    first = store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
+    store.apply({"op": "delete", "id": b, "kind": "node", "reason": "", "cascade": [["node", b]]})
+    store.apply({"op": "restore", "of": first})
+    assert store.nodes[a].live is True and store.nodes[a].deleted_by is None
+    assert store.nodes[b].live is False
+
+
+def test_withdraw_records_the_source_and_restore_forgets_it(tmp_path):
+    store = Store(tmp_path)
+    a = put(store, "supplier", support=[["doc:a.csv#r1"]], name="A")
+    pos = store.apply({"op": "withdraw", "source": "doc:a.csv", "reason": "", "cascade": [["node", a]]})
+    assert store.withdrawn == {pos: "doc:a.csv"}
+    assert store.nodes[a].live is False
+    store.apply({"op": "restore", "of": pos})
+    assert store.withdrawn == {} and store.nodes[a].live is True
+
+
+def test_delete_of_a_dead_or_unknown_artifact_is_refused(tmp_path):
+    import pytest
+
+    from theorem.engine.storage import StoreError
+
+    store = Store(tmp_path)
+    a = put(store, "supplier", name="A")
+    store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
+    with pytest.raises(StoreError):
+        store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
+    with pytest.raises(StoreError):
+        store.apply({"op": "restore", "of": 999})
+
+
+def test_restore_keeps_an_artifact_dead_when_its_evidence_still_is(tmp_path):
+    store = Store(tmp_path)
+    a = put(store, "supplier", name="A")
+    b = put(store, "supplier", name="B")
+    z = put(store, "supplier", support=[[a, b]], name="Z")  # one bundle needing both
+    pos_a = store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a], ["node", z]]})
+    pos_b = store.apply({"op": "delete", "id": b, "kind": "node", "reason": "", "cascade": [["node", b]]})
+    store.apply({"op": "restore", "of": pos_a, "kept_dead": [["node", z, pos_b]]})
+    assert store.nodes[a].live is True
+    assert store.nodes[z].live is False and store.nodes[z].deleted_by == pos_b
+    store.apply({"op": "restore", "of": pos_b, "kept_dead": []})
+    assert store.nodes[z].live is True
+
+
+def test_patch_edge_replaces_the_receipt(tmp_path):
+    store = Store(tmp_path)
+    p = put(store, "part", name="cell")
+    s = put(store, "supplier", name="Ionix")
+    e = link(store, "supplied_by", support=[["doc:a.csv#r1"]], item=p, source=s)
+    store.apply({"op": "patch_edge", "id": e, "support": [["doc:a.csv#r1"], ["doc:b.csv#r4"]]})
+    assert store.edge_index[e].support == [["doc:a.csv#r1"], ["doc:b.csv#r4"]]
+    assert e in store.dependents["doc:b.csv#r4"] and e in store.sources["doc:b.csv"]
+
+
+def test_live_views_skip_tombstones(tmp_path):
+    store = Store(tmp_path)
+    a = put(store, "supplier", name="A")
+    b = put(store, "supplier", name="B")
+    store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
+    assert [n.id for n in store.live_nodes()] == [b]
+    assert store.live_by_class("supplier") == [b]
+
+
+def test_patch_node_can_unset_a_property_and_replace_the_receipt(tmp_path):
+    store = Store(tmp_path)
+    a = put(store, "supplier", support=[["doc:a.csv#r1"]], name="A", country="DE")
+    store.apply({"op": "patch_node", "id": a, "props": {}, "unset": ["country"], "support": [["doc:b.csv#r2"]]})
+    assert "country" not in store.nodes[a].props
+    assert store.nodes[a].support == [["doc:b.csv#r2"]]
+    assert a not in store.dependents.get("doc:a.csv#r1", set())
+    assert store.dependents["doc:b.csv#r2"] == {a}
+
+
+def test_tombstones_survive_snapshot_and_reopen(tmp_path):
+    store = Store(tmp_path)
+    a = put(store, "supplier", support=[["doc:a.csv#r1"]], name="A")
+    pos = store.apply({"op": "withdraw", "source": "doc:a.csv", "reason": "", "cascade": [["node", a]]})
+    store.snapshot()
+    store.close()
+    again = Store(tmp_path)
+    assert again.nodes[a].live is False and again.nodes[a].deleted_by == pos
+    assert again.withdrawn == {pos: "doc:a.csv"}
+
+
+def test_reads_skip_deleted_nodes_and_edges(tmp_path):
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "Ionix"} as a')
+    s.execute('assert part {name: "cell"} as p')
+    s.execute("assert edge supplied_by(item: p, source: a)")
+    a = s.store.by_name[("supplier", "ionix")][0]
+    out = s.store.cascade(nodes=[a])
+    s.store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", n] for n in out.nodes] + [["edge", e] for e in out.edges]})
+    assert s.rows("find supplier as x\nreturn x.name") == []
+    assert s.rows("find part as p\nfollow p supplied_by source as sup\nreturn sup.name") == []
+    s.close()
+
+
+def test_deleted_nodes_free_quota_and_hide_from_dedup_and_render(tmp_path):
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute("derive class widget from entity with {} quota 1")
+    s.execute('assert widget {name: "Ionix"} as a')
+    a = s.store.by_name[("widget", "ionix")][0]
+    s.store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
+    out = s.execute('assert widget {name: "Ionix Co"} as b')  # quota freed, no dup offered
+    assert "dup candidates" not in out
+    assert "widget" in s.schema.render(s.store)
+    b = s.store.by_name[("widget", "ionix co")][0]
+    s.store.apply({"op": "delete", "id": b, "kind": "node", "reason": "", "cascade": [["node", b]]})
+    assert "widget" not in s.schema.render(s.store)
+    s.close()

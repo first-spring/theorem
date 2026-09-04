@@ -80,7 +80,7 @@ class Receipt:
 def _quota_check(ctx: WriteContext, cls: str) -> None:
     cdef = ctx.schema.classes[cls]
     if cdef.status == "provisional" and cdef.quota is not None:
-        count = sum(1 for n in ctx.store.nodes.values() if n.cls == cls)
+        count = len(ctx.store.live_by_class(cls))
         if count >= cdef.quota:
             raise WriteError(
                 f"class {cls} is provisional and at quota ({cdef.quota} instances)"

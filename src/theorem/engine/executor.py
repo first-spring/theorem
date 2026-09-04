@@ -421,7 +421,7 @@ def _find_rows(stmt: Find, store: Store, schema: Schema) -> list[dict]:
         pool = [
             {name: n.id}
             for n in nodes
-            if n.retired_at is None and store.resolve(n.id) == n.id
+            if n.live and store.resolve(n.id) == n.id
         ]
 
         def getter(row):
@@ -554,13 +554,13 @@ def _follow_once(stmt: Follow, table: Table, store: Store, schema: Schema) -> No
         src_id = store.resolve(row[stmt.src])
         matched = False
         for edge in store.edges.get(src_id, []):
-            if edge.type != stmt.edge or edge.retired_at is not None:
+            if edge.type != stmt.edge or not edge.live:
                 continue
             if store.resolve(edge.roles[depart_role]) != src_id:
                 continue
             dst = store.resolve(edge.roles[arrive_role])
             dst_node = store.nodes.get(dst)
-            if dst_node is None or dst_node.retired_at is not None:
+            if dst_node is None or not dst_node.live:
                 continue
             if not stmt.optional and edge.id in row.get("__edges__", ()):
                 # Trail semantics: within one path an edge is walked once,
@@ -825,7 +825,7 @@ def _render_node_block(store: Store, schema: Schema, node_id: str) -> list[str]:
     name = node.props.get("name") or node.props.get("title") or node.id
     lines = [f'{node.cls} "{name}"' + (f" {{{props}}}" if props else "")]
     for edge in store.edges.get(node.id, []):
-        if edge.retired_at is not None:
+        if not edge.live:
             continue
         roles = list(edge.roles.items())
         (_, subj_id), (_, obj_id) = roles[0], roles[1]
