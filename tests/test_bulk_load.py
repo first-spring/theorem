@@ -261,6 +261,25 @@ def test_the_cli_can_open_a_database_without_the_demo_classes(tmp_path, capsys):
         assert "product" not in out
 
 
+def test_loaded_rows_carry_their_provenance(tmp_path):
+    from theorem.ingest.bulk import load_nodes
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    csv_path = tmp_path / "suppliers.csv"
+    csv_path.write_text("name,country\nA,DE\nB,KR\n", encoding="utf-8")
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    load_nodes(s, csv_path, "supplier")
+    a = s.store.by_name[("supplier", "a")][0]
+    b = s.store.by_name[("supplier", "b")][0]
+    assert s.store.nodes[a].support == [["doc:suppliers.csv#r2"]]
+    assert s.store.nodes[b].support == [["doc:suppliers.csv#r3"]]
+    assert s.store.sources["doc:suppliers.csv"] == {a, b}
+    out = s.execute('withdraw doc:suppliers.csv reason "bad file"')
+    assert "cascade: 2 nodes, 0 edges" in out
+    s.close()
+
+
 def test_the_package_exports_what_an_application_needs():
     import theorem
 

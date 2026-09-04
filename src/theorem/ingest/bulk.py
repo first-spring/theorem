@@ -126,6 +126,7 @@ def load_nodes(session, path: Path, cls: str) -> LoadReceipt:
                 "id": store.next_id(cls),
                 "cls": cls,
                 "props": values,
+                "support": [[f"doc:{path.name}#r{line}"]],
             }
         )
     store.bulk(records)
@@ -207,6 +208,7 @@ def load_edges(session, path: Path, edge: str, columns: dict[str, str]) -> LoadR
                 "type": edge,
                 "roles": roles,
                 "props": props,
+                "support": [[f"doc:{path.name}#r{line}"]],
             }
         )
     if records:
