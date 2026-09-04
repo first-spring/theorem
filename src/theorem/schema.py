@@ -96,7 +96,9 @@ class Schema:
         base = cdef.base
         while base is not None:
             if prop in self.classes[base].props:
-                raise ValueError(f'property "{prop}" is declared on base class {base}; change it there')
+                raise ValueError(
+                    f'property "{prop}" is declared on base class {base}; change it there'
+                )
             base = self.classes[base].base
         raise KeyError(prop)
 

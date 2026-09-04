@@ -418,11 +418,7 @@ def _find_rows(stmt: Find, store: Store, schema: Schema) -> list[dict]:
                     for nid in store.by_class.get(target, ())
                 ]
             nodes = [store.nodes[nid] for nid in candidates]
-        pool = [
-            {name: n.id}
-            for n in nodes
-            if n.live and store.resolve(n.id) == n.id
-        ]
+        pool = [{name: n.id} for n in nodes if n.live and store.resolve(n.id) == n.id]
 
         def getter(row):
             return lambda col: _first_prop(store, schema, row[name], col)

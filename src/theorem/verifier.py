@@ -146,7 +146,9 @@ def _check_new_class_name(schema: Schema, name: str, line: int) -> None:
             f'class name "{name}" must be a lowercase identifier (node ids derive from it)',
         )
     if name in SPECIAL_TARGETS:
-        raise VerifyError(line, f'"{name}" is a reserved find target and cannot be a class')
+        raise VerifyError(
+            line, f'"{name}" is a reserved find target and cannot be a class'
+        )
 
 
 def _check_cond(
@@ -483,7 +485,9 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
         case SetProps(ref=ref, props=props):
             typ = _ref_type(ref, env, line)
             if "name" in props and props["name"] is None:
-                raise VerifyError(line, "name cannot be removed; nodes are indexed by it")
+                raise VerifyError(
+                    line, "name cannot be removed; nodes are indexed by it"
+                )
             if typ is not None and typ in schema.classes:
                 all_props = schema.all_props(typ)
                 for prop, value in props.items():
@@ -553,16 +557,21 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
             _check_class(schema, cls, line)
             try:
                 schema.own_prop(cls, name)
-            except KeyError:
+            except KeyError as e:
                 raise VerifyError(
-                    line, f'unknown property "{name}" on class {cls}.{_suggest(name, schema.all_props(cls))}'
-                )
+                    line,
+                    f'unknown property "{name}" on class {cls}.{_suggest(name, schema.all_props(cls))}',
+                ) from e
             except ValueError as e:
-                raise VerifyError(line, str(e))
+                raise VerifyError(line, str(e)) from e
             if to in schema.all_props(cls):
-                raise VerifyError(line, f'property "{to}" already exists on class {cls}')
+                raise VerifyError(
+                    line, f'property "{to}" already exists on class {cls}'
+                )
             if not re.fullmatch(r"[a-z][a-z0-9_]*", to):
-                raise VerifyError(line, f'property name "{to}" must be a lowercase identifier')
+                raise VerifyError(
+                    line, f'property name "{to}" must be a lowercase identifier'
+                )
             schema.rename_prop(cls, name, to)
 
         case AlterClass(cls=cls, action=action, decls=decls, names=names):
@@ -571,38 +580,51 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
                 if action == "add":
                     for prop in decls:
                         if prop in schema.all_props(cls):
-                            raise VerifyError(line, f'property "{prop}" already exists on class {cls}')
+                            raise VerifyError(
+                                line, f'property "{prop}" already exists on class {cls}'
+                            )
                         if not re.fullmatch(r"[a-z][a-z0-9_]*", prop):
-                            raise VerifyError(line, f'property name "{prop}" must be a lowercase identifier')
+                            raise VerifyError(
+                                line,
+                                f'property name "{prop}" must be a lowercase identifier',
+                            )
                     schema.alter_add(cls, decls)
                 elif action == "drop":
                     if "name" in names:
-                        raise VerifyError(line, "name cannot be dropped; nodes are indexed by it")
+                        raise VerifyError(
+                            line, "name cannot be dropped; nodes are indexed by it"
+                        )
                     schema.alter_drop(cls, names)
                 else:
                     schema.alter_retype(cls, decls)
             except KeyError as e:
                 raise VerifyError(
-                    line, f'unknown property "{e.args[0]}" on class {cls}.{_suggest(e.args[0], schema.all_props(cls))}'
-                )
+                    line,
+                    f'unknown property "{e.args[0]}" on class {cls}.{_suggest(e.args[0], schema.all_props(cls))}',
+                ) from e
             except ValueError as e:
-                raise VerifyError(line, str(e))
+                raise VerifyError(line, str(e)) from e
 
         case DropClass(name=name, preview=preview):
             _check_class(schema, name, line)
             if name in BUILTIN_CLASSES:
-                raise VerifyError(line, f'class "{name}" is built-in and cannot be dropped')
+                raise VerifyError(
+                    line, f'class "{name}" is built-in and cannot be dropped'
+                )
             children = [c.name for c in schema.classes.values() if c.base == name]
             if children:
                 raise VerifyError(
-                    line, f'class "{name}" has subclasses ({", ".join(children)}); drop them first'
+                    line,
+                    f'class "{name}" has subclasses ({", ".join(children)}); drop them first',
                 )
             if not preview:
                 schema.drop_class(name)
 
         case DropEdge(name=name, preview=preview):
             if name not in schema.edges:
-                raise VerifyError(line, f'unknown edge type "{name}".{_suggest(name, schema.edges)}')
+                raise VerifyError(
+                    line, f'unknown edge type "{name}".{_suggest(name, schema.edges)}'
+                )
             if not preview:
                 schema.drop_edge(name)
 

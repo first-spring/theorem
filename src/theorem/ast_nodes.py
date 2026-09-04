@@ -161,6 +161,7 @@ class SetProps(Stmt):
     ref: str
     props: dict[str, object]  # None means: remove this property
 
+
 @dataclass
 class Delete(Stmt):
     ref: str
@@ -223,11 +224,13 @@ class DropClass(Stmt):
     reason: str
     preview: bool = False
 
+
 @dataclass
 class DropEdge(Stmt):
     name: str
     reason: str
     preview: bool = False
+
 
 @dataclass
 class SchemaStmt(Stmt):

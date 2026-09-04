@@ -201,9 +201,13 @@ def render_stmt(stmt: Stmt) -> str:
             return f"set {ref} {_props(props)}"
         case Delete(ref=ref, kind=kind, reason=reason, preview=preview):
             head = "delete edge" if kind == "edge" else "delete"
-            return f"{head} {ref} reason {_quoted(reason)}" + (" preview" if preview else "")
+            return f"{head} {ref} reason {_quoted(reason)}" + (
+                " preview" if preview else ""
+            )
         case Withdraw(source=source, reason=reason, preview=preview):
-            return f"withdraw {source} reason {_quoted(reason)}" + (" preview" if preview else "")
+            return f"withdraw {source} reason {_quoted(reason)}" + (
+                " preview" if preview else ""
+            )
         case Restore(position=position):
             return f"restore @t-{position}"
         case DeriveClass(name=n, base=base, props=props, quota=quota, dedup=dedup):
@@ -227,7 +231,11 @@ def render_stmt(stmt: Stmt) -> str:
             body = ", ".join(f"{k}: {v}" for k, v in decls.items())
             return f"alter class {cls} {action} {{{body}}}"
         case DropClass(name=n, reason=reason, preview=preview):
-            return f"drop class {n} reason {_quoted(reason)}" + (" preview" if preview else "")
+            return f"drop class {n} reason {_quoted(reason)}" + (
+                " preview" if preview else ""
+            )
         case DropEdge(name=n, reason=reason, preview=preview):
-            return f"drop edge {n} reason {_quoted(reason)}" + (" preview" if preview else "")
+            return f"drop edge {n} reason {_quoted(reason)}" + (
+                " preview" if preview else ""
+            )
     raise CanonicalError(f"cannot render {type(stmt).__name__}")
