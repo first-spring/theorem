@@ -492,7 +492,9 @@ class Store:
                 raise StoreError(
                     f"restore: @t-{of} dropped a class or edge type; derive it again and reload"
                 )
-            if not isinstance(of, int) or not self._deleted_by(of):
+            if not isinstance(of, int) or (
+                not self._deleted_by(of) and of not in self.withdrawn
+            ):
                 raise StoreError(f"restore: nothing was deleted at @t-{of}")
             kept_dead = record.get("kept_dead", [])
             if not isinstance(kept_dead, list) or not all(

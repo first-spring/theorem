@@ -522,6 +522,25 @@ def test_withdraw_takes_everything_only_that_source_built(tmp_path):
     s.close()
 
 
+def test_restore_lifts_a_withdrawal_that_removed_nothing(tmp_path):
+    """A source nothing cites still marks itself withdrawn even though the
+    cascade is empty; restore must still be able to lift that withdrawal,
+    not refuse it for want of a dead node or edge to bring back."""
+    s = _session(tmp_path)
+    out = s.execute('withdraw doc:b.csv reason "never mind"')
+    assert "receipt: withdrew doc:b.csv at @t-" in out
+    assert "cascade: 0 nodes, 0 edges" in out
+    pos = int(out.split("restore @t-")[1].split()[0])
+    assert s.store.withdrawn == {pos: "doc:b.csv"}
+    out = s.execute(f"restore @t-{pos}")
+    assert f"receipt: restored 0 nodes, 0 edges from @t-{pos} at @t-" in out
+    assert "source doc:b.csv is no longer withdrawn" in out
+    assert s.store.withdrawn == {}
+    out = s.run(f"restore @t-{pos}")
+    assert "error" in out and f"nothing was deleted at @t-{pos}" in out
+    s.close()
+
+
 def test_withdraw_accepts_an_anchor_and_uses_the_document(tmp_path):
     from theorem.parser import parse
 

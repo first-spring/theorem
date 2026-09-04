@@ -592,8 +592,21 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
             f"@t-{stmt.position} dropped a class or edge type; derive it again and reload"
         )
     gone = store._deleted_by(stmt.position)
-    if not gone:
+    withdrawn_source = store.withdrawn.get(stmt.position)
+    if not gone and withdrawn_source is None:
         raise WriteError(f"nothing was deleted at @t-{stmt.position}")
+    if not gone:
+        # Nothing carries deleted_by == pos: this position withdrew a source
+        # and withdrawing it removed nothing, because every row it named was
+        # already dead, or it named none. There is no liveness to
+        # recompute; lifting the withdrawal is the whole restore.
+        pos = store.apply({"op": "restore", "of": stmt.position, "kept_dead": []})
+        return Receipt(
+            [
+                f"receipt: restored 0 nodes, 0 edges from @t-{stmt.position} at @t-{pos}",
+                f"  source {withdrawn_source} is no longer withdrawn",
+            ]
+        )
     # Evaluate aliveness as it will read right after this restore lands: a
     # bundle citing a sibling victim of this same deletion must see that
     # sibling as live again, not as dead from the pre-restore store, which
