@@ -85,7 +85,7 @@ def compute(
     for eid in edges:
         if eid in store.edge_index and store.edge_index[eid].live and eid not in dead:
             take(eid)
-    for doc in dead_sources:
+    for doc in sorted(dead_sources):
         for art_id in sorted(store.sources.get(doc, ())):
             art = store.nodes.get(art_id) or store.edge_index.get(art_id)
             if art is None or not art.live or art_id in dead:

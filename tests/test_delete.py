@@ -58,15 +58,28 @@ def test_already_dead_artifacts_are_not_listed_again(tmp_path):
     assert store.cascade(sources=["doc:a.csv"]).nodes == []
 
 
+def test_multi_source_cascade_orders_by_document_not_hash(tmp_path):
+    """Seeding order must not depend on set iteration order of the sources."""
+    store = Store(tmp_path)
+    a = put(store, "supplier", support=[["doc:a.csv#r1"]], name="A")
+    b = put(store, "supplier", support=[["doc:b.csv#r1"]], name="B")
+    out = store.cascade(sources=["doc:b.csv", "doc:a.csv"])
+    assert out.nodes == [a, b]
+
+
 def test_retired_evidence_still_counts(tmp_path):
-    """compact retires its members; the summary they support must not die of it."""
+    """compact retires its members; a summary they support must survive a
+    deletion that makes the cascade look at it."""
     store = Store(tmp_path)
     a = put(store, "supplier", name="A")
-    summary = put(store, "supplier", support=[[a]], name="AB")
+    b = put(store, "supplier", support=[["doc:b.csv#r1"]], name="B")
+    summary = put(store, "supplier", support=[[a], [b]], name="AB")
     store.apply({"op": "retire", "id": a, "reason": "compacted"})
-    other = put(store, "supplier", support=[["doc:x.csv#r1"]], name="X")
-    assert store.cascade(nodes=[other]).nodes == [other]  # summary untouched
-    assert summary in store.nodes and store.nodes[summary].live
+    # deleting b makes the walk evaluate summary; its other bundle cites the
+    # retired a, which is still evidence, so summary lives
+    out = store.cascade(nodes=[b])
+    assert out.nodes == [b]
+    assert store.nodes[summary].live
 
 
 @pytest.mark.xfail(strict=True, reason="alias re-keying lands in Task 3")
