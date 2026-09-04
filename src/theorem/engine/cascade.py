@@ -71,7 +71,15 @@ def compute(
     dead: set[str] = set()
     order: list[str] = []
     work: deque[str] = deque()
-    dead_sources = set(sources)
+    seeds = set(sources)
+    # A document withdrawn earlier is still dead evidence now. Without it,
+    # liveness would depend on the order two statements ran in: withdrawing
+    # a source and then deleting a node would leave an artifact alive that
+    # the same two statements in the other order kill. Only the sources
+    # named here seed the walk, though; an earlier withdrawal already had
+    # its cascade, and re-seeding from it would let an unrelated deletion
+    # sweep up artifacts written since.
+    dead_sources = set(store.withdrawn.values()) | seeds
 
     def take(art_id: str) -> None:
         dead.add(art_id)
@@ -85,7 +93,7 @@ def compute(
     for eid in edges:
         if eid in store.edge_index and store.edge_index[eid].live and eid not in dead:
             take(eid)
-    for doc in sorted(dead_sources):
+    for doc in sorted(seeds):
         for art_id in sorted(store.sources.get(doc, ())):
             art = store.nodes.get(art_id) or store.edge_index.get(art_id)
             if art is None or not art.live or art_id in dead:

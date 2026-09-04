@@ -609,6 +609,16 @@ def _restore(stmt: Restore, ctx: WriteContext) -> Receipt:
                 and (store.nodes.get(m) or store.edge_index.get(m)) is not None
                 and (store.nodes.get(m) or store.edge_index.get(m)).deleted_at is not None
             ]
+            # An edge also dies with either endpoint, and an endpoint is not
+            # in its receipt. Without this, an edge held down by a node some
+            # later deletion took would be blamed on the restore just run,
+            # and the receipt would tell the operator to re-run it.
+            edge = store.edge_index.get(art.id)
+            if edge is not None:
+                for nid in edge.roles.values():
+                    end = store.nodes.get(store.resolve(nid))
+                    if end is not None and end.deleted_at is not None:
+                        dead_ids_by.append(end.deleted_by)
             if dead_ids_by:
                 by = max(dead_ids_by)
             else:

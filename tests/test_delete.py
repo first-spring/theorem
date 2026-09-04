@@ -421,6 +421,51 @@ def test_restore_of_a_withdrawal_attributes_a_still_dead_artifact_to_the_other_w
     s.close()
 
 
+def test_a_withdrawn_source_is_dead_evidence_whichever_statement_ran_first(tmp_path):
+    """Liveness is a property of the graph, not of the order two statements
+    ran in. Z rests on a withdrawn document or on a deleted node; once both
+    are gone it is dead either way round."""
+    withdraw_first = Store(tmp_path / "a")
+    s = put(withdraw_first, "supplier", name="S")
+    z = put(withdraw_first, "supplier", support=[["doc:a.csv#r1"], [s]], name="Z")
+    withdraw_first.apply(
+        {"op": "withdraw", "source": "doc:a.csv", "reason": "", "cascade": []}
+    )
+    assert withdraw_first.nodes[z].live is True  # the bundle citing S still holds
+    assert withdraw_first.cascade(nodes=[s]).nodes == [s, z]
+
+    delete_first = Store(tmp_path / "b")
+    s = put(delete_first, "supplier", name="S")
+    z = put(delete_first, "supplier", support=[["doc:a.csv#r1"], [s]], name="Z")
+    delete_first.apply(
+        {"op": "delete", "id": s, "kind": "node", "reason": "", "cascade": [["node", s]]}
+    )
+    assert delete_first.nodes[z].live is True
+    assert delete_first.cascade(sources=["doc:a.csv"]).nodes == [z]
+
+
+def test_restore_blames_the_deletion_that_still_holds_an_edge_endpoint(tmp_path):
+    """An edge kept dead by a still-deleted endpoint must point the operator
+    at the deletion that took the endpoint, not at the restore just run."""
+    from theorem.schema import Schema
+    from theorem.session import Session
+
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "Ionix"} as a')
+    s.execute('assert part {name: "cell"} as p')
+    s.execute("assert edge supplied_by(item: p, source: a)")
+    first = s.execute('delete #s-1 reason "supplier"').split("restore @t-")[1].split()[0]
+    second = s.execute('delete #p-1 reason "part"').split("restore @t-")[1].split()[0]
+    out = s.execute(f"restore @t-{first}")
+    assert "still dead: 1" in out
+    assert f"#e-1 (needs restore @t-{second})" in out
+    assert f"needs restore @t-{first}" not in out
+    s.execute(f"restore @t-{second}")
+    rows = s.rows("find part as p\nfollow p supplied_by source as sup\nreturn sup.name")
+    assert rows == [["Ionix"]]
+    s.close()
+
+
 def test_withdraw_parses_and_canonicalizes():
     from theorem.canonical import canonical
     from theorem.parser import parse
