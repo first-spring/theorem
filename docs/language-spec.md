@@ -33,7 +33,8 @@ continue    := "continue" HANDLE ["budget" INT "tokens"]
 or          := "or"                                   ; alone on its line
 
 write_stmt  := assert_node | assert_edge | merge | distinct_s | refine
-             | compact | retire | flag | delete | withdraw | restore | derive
+             | compact | retire | flag | set_stmt | delete | withdraw
+             | restore | derive
 assert_node := "assert" CLASSNAME props [support] "as" NAME
 assert_edge := "assert" "edge" EDGENAME "(" ROLENAME ":" ref ","
                ROLENAME ":" ref ")" [support]
@@ -47,6 +48,7 @@ bundle      := "[" evidence ("," evidence)* "]"
 evidence    := PROVENANCE | NODEID
 retire      := "retire" ref "reason" STRING
 flag        := "flag" ref "reason" STRING
+set_stmt    := "set" ref props                        ; a value of `none` removes the property
 delete      := "delete" ["edge"] ref "reason" STRING ["preview"]
 withdraw    := "withdraw" PROVENANCE "reason" STRING ["preview"]
 restore     := "restore" POSITION
@@ -128,6 +130,7 @@ Every write returns a **receipt**: created and changed ids, position `@t-N`, the
 - **compact binding as name {props}**: replaces the bound node set with one summary node (state `composite`, parent lineage).
 - **retire ref reason "..."**: temporal invalidation. The node keeps its history and is excluded from current-time reads.
 - **flag ref reason "..."**: marks the node as having caused a downstream failure; feeds `health.query`.
+- **set ref {prop: value, other: none}**: change property values on an existing node; `none` removes one. Verified against the class like `assert`. Counted as a confirming write; a changed value counts toward `conflict_count`.
 - **delete ref reason "..."** / **delete edge ref reason "..."**: tombstone the artifact and everything its removal leaves unsupported, in one record. `preview` computes and reports the cascade without writing. Deleted artifacts leave every read; `restore @t-N` reverses the record. Differs from `retire` by cascading and by being restorable.
 - **withdraw doc:name reason "..."**: the source is dead; every artifact whose every bundle cites it goes, then the cascade. An anchor on the token is ignored, the whole document is withdrawn.
 - **restore @t-N**: reverses the deletion or withdrawal committed at position N, restoring exactly the artifacts it tombstoned. Refuses when nothing carries that position. Drops of classes and edge types are not restorable.

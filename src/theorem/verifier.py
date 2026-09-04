@@ -36,6 +36,7 @@ from .ast_nodes import (
     Retire,
     Return,
     SchemaStmt,
+    SetProps,
     Stmt,
     Withdraw,
 )
@@ -460,6 +461,21 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
 
         case Retire(ref=ref) | Flag(ref=ref):
             _ref_type(ref, env, line)
+
+        case SetProps(ref=ref, props=props):
+            typ = _ref_type(ref, env, line)
+            if "name" in props and props["name"] is None:
+                raise VerifyError(line, "name cannot be removed; nodes are indexed by it")
+            if typ is not None and typ in schema.classes:
+                all_props = schema.all_props(typ)
+                for prop, value in props.items():
+                    if prop not in all_props:
+                        raise VerifyError(
+                            line,
+                            f'unknown property "{prop}" on class {typ}.{_suggest(prop, all_props)}',
+                        )
+                    if value is not None:
+                        _check_literal_type(value, all_props[prop], prop, typ, line)
 
         case Delete(ref=ref, kind=kind):
             if kind == "node":

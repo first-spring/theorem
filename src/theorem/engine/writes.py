@@ -23,10 +23,12 @@ from ..ast_nodes import (
     Refine,
     Restore,
     Retire,
+    SetProps,
     Stmt,
     Withdraw,
 )
 from ..schema import ClassDef, EdgeDef, Schema
+from ..verifier import VerifyError, _check_literal_type
 from . import dedup
 from .storage import Store, source_of
 
@@ -455,6 +457,31 @@ def _flag(stmt: Flag, ctx: WriteContext) -> Receipt:
     return Receipt([f"receipt: flagged {nid} at @t-{pos}", "  health.query updated"])
 
 
+def _set(stmt: SetProps, ctx: WriteContext) -> Receipt:
+    store = ctx.store
+    nid = ctx.resolve_ref(stmt.ref)
+    node = store.nodes[nid]
+    if not node.live:
+        raise WriteError(f"{stmt.ref} ({nid}) is deleted or retired")
+    all_props = ctx.schema.all_props(node.cls)
+    for prop, value in stmt.props.items():
+        if prop not in all_props:
+            raise WriteError(f'unknown property "{prop}" on class {node.cls}')
+        if value is not None:
+            # `set #s-1 {...}` names no binding, so the verifier could not
+            # type it; the node's class is known here, so check it now.
+            try:
+                _check_literal_type(value, all_props[prop], prop, node.cls, stmt.line)
+            except VerifyError as e:
+                raise WriteError(str(e).split("\n")[0].removeprefix("error: ")) from e
+    values = {k: v for k, v in stmt.props.items() if v is not None}
+    unset = [k for k, v in stmt.props.items() if v is None]
+    pos = store.apply({"op": "patch_node", "id": nid, "props": values, "unset": unset})
+    changed = ", ".join(sorted(values)) or "nothing"
+    removed = f"; removed {', '.join(unset)}" if unset else ""
+    return Receipt([f"receipt: set {nid} at @t-{pos}", f"  changed: {changed}{removed}"])
+
+
 def _cascade_lines(store, cascade) -> list[str]:
     lines = [f"  cascade: {len(cascade.nodes)} nodes, {len(cascade.edges)} edges"]
     groups: dict[str, list[str]] = {}
@@ -690,6 +717,8 @@ def execute_write(stmt: Stmt, ctx: WriteContext) -> Receipt:
             return _retire(stmt, ctx)
         case Flag():
             return _flag(stmt, ctx)
+        case SetProps():
+            return _set(stmt, ctx)
         case Delete():
             return _delete(stmt, ctx)
         case Withdraw():

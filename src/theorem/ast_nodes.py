@@ -157,6 +157,11 @@ class Flag(Stmt):
 
 
 @dataclass
+class SetProps(Stmt):
+    ref: str
+    props: dict[str, object]  # None means: remove this property
+
+@dataclass
 class Delete(Stmt):
     ref: str
     kind: str  # "node" | "edge"

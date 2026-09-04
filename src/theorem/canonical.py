@@ -43,6 +43,7 @@ from .ast_nodes import (
     Retire,
     Return,
     SchemaStmt,
+    SetProps,
     Stmt,
     Withdraw,
 )
@@ -77,7 +78,7 @@ def _quoted(v: str) -> str:
 
 
 def _literal(v: object) -> str:
-    if type(v).__name__ == "_Missing":
+    if v is None or type(v).__name__ == "_Missing":
         return "none"
     if isinstance(v, bool):
         return "true" if v else "false"
@@ -191,6 +192,8 @@ def render_stmt(stmt: Stmt) -> str:
             return f"retire {ref} reason {_quoted(reason)}"
         case Flag(ref=ref, reason=reason):
             return f"flag {ref} reason {_quoted(reason)}"
+        case SetProps(ref=ref, props=props):
+            return f"set {ref} {_props(props)}"
         case Delete(ref=ref, kind=kind, reason=reason, preview=preview):
             head = "delete edge" if kind == "edge" else "delete"
             return f"{head} {ref} reason {_quoted(reason)}" + (" preview" if preview else "")

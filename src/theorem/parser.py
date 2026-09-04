@@ -35,6 +35,7 @@ from .ast_nodes import (
     Retire,
     Return,
     SchemaStmt,
+    SetProps,
     Stmt,
     Withdraw,
 )
@@ -747,6 +748,11 @@ class _Parser:
         ref = self.ref()
         self.expect_word("reason")
         return Flag(ref, self.string())
+
+    def parse_set(self) -> SetProps:
+        ref = self.ref()
+        props = self.props()
+        return SetProps(ref, {k: (None if v is _NONE else v) for k, v in props.items()})
 
     def parse_delete(self) -> Delete:
         kind = "node"
