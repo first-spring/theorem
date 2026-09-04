@@ -93,7 +93,7 @@ def sweep(store: Store) -> int:
     """Similarity stage, async shape: cross-block near-name scan per class."""
     by_cls: dict[str, list[Node]] = {}
     for node in store.nodes.values():
-        if node.retired_at is None and store.resolve(node.id) == node.id:
+        if node.live and store.resolve(node.id) == node.id:
             by_cls.setdefault(node.cls, []).append(node)
     found = 0
     for nodes in by_cls.values():

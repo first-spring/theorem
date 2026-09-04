@@ -226,3 +226,18 @@ def test_deleted_nodes_free_quota_and_hide_from_dedup_and_render(tmp_path):
     s.store.apply({"op": "delete", "id": b, "kind": "node", "reason": "", "cascade": [["node", b]]})
     assert "widget" not in s.schema.render(s.store)
     s.close()
+
+
+def test_sweep_skips_a_tombstoned_node(tmp_path):
+    """The async sweep is a reader too: a deleted node must never come back
+    as a duplicate candidate, cross-block match or not."""
+    from theorem.engine import dedup
+
+    store = Store(tmp_path)
+    a = put(store, "supplier", name="VoltaChem", country="DE")
+    # "The VoltaChem" blocks under "thev", a different block than "volt",
+    # so only the cross-block sweep (not sync_candidates) would catch this pair.
+    put(store, "supplier", name="The VoltaChem", country="DE")
+    store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
+    assert dedup.sweep(store) == 0
+    assert store.dup_ledger == []
