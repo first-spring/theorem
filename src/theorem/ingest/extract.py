@@ -34,12 +34,16 @@ class ExtractReceipt:
 
 def _doc_chunks(session, doc_id: str) -> list:
     store = session.store
+    # Extraction is a read: a tombstoned chunk, or one whose part_of edge a
+    # deletion took, is not part of the document any more.
     chunks = [
         node
         for node in store.nodes.values()
         if node.cls == "chunk"
+        and node.live
         and any(
-            edge.type == "part_of"
+            edge.live
+            and edge.type == "part_of"
             and edge.roles.get("piece") == node.id
             and edge.roles.get("whole") == doc_id
             for edge in store.edges.get(node.id, [])
@@ -57,7 +61,9 @@ def _latest_focus(session) -> str:
     best = ""
     best_pos = -1
     for node in store.nodes.values():
-        if node.cls != "document":
+        # A deleted document's focus is not the standing instruction; it
+        # would otherwise steer every extraction after the document is gone.
+        if node.cls != "document" or not node.live:
             continue
         focus = node.props.get("_focus")
         if not focus:

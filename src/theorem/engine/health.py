@@ -7,7 +7,9 @@ from .storage import Store
 
 def scores(store: Store, node_id: str) -> dict[str, float]:
     node = store.nodes[node_id]
-    degree = len([e for e in store.edges.get(node_id, []) if e.retired_at is None])
+    # Live, not merely unretired: an edge a deletion tombstoned is gone from
+    # every read, so counting it would call an orphan connected.
+    degree = len([e for e in store.edges.get(node_id, []) if e.live])
     loss = min(1.0, node.conflict_count / 5)
     query = min(1.0, len(node.flags) / 3)
     structure = max(

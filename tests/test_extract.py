@@ -76,3 +76,47 @@ def test_extract_budget_stops(staged):
     sess, doc = staged
     r = extract(sess, doc, ScriptedRunner([]), budget=1)
     assert r.stopped_early and r.chunks_done == 0
+
+
+def _delete(sess, nid: str) -> None:
+    cascade = sess.store.cascade(nodes=[nid])
+    sess.store.apply(
+        {
+            "op": "delete",
+            "id": nid,
+            "kind": "node",
+            "reason": "",
+            "cascade": [["node", n] for n in cascade.nodes]
+            + [["edge", e] for e in cascade.edges],
+        }
+    )
+
+
+def test_extraction_skips_a_deleted_chunk(tmp_path):
+    sess = Session(tmp_path / "db", Schema.supply_chain())
+    raw = b"# One\n\nVoltaChem supplies cells.\n\n# Two\n\nIonix supplies anodes."
+    r = stage(sess, normalize(raw, "note.md"), "note.md", raw)
+    chunks = [n.id for n in sess.store.nodes.values() if n.cls == "chunk"]
+    assert len(chunks) == 2
+    _delete(sess, chunks[0])
+    good = 'assert supplier {name: "Ionix", country: "DE"} source doc:note.md#p0 as s1'
+    runner = ScriptedRunner([good, good])
+    receipt = extract(sess, r.doc_id, runner)
+    assert receipt.chunks_done == 1
+    assert len(runner.prompts) == 1
+
+
+def test_a_deleted_document_does_not_supply_the_focus(tmp_path):
+    sess = Session(tmp_path / "db", Schema.supply_chain())
+    stale = b"# Old\n\nstale note."
+    old = stage(sess, normalize(stale, "old.md"), "old.md", stale)
+    sess.store.apply(
+        {"op": "patch_node", "id": old.doc_id, "props": {"_focus": "Stale focus."}}
+    )
+    raw = b"# New\n\nVoltaChem supplies cells."
+    r = stage(sess, normalize(raw, "new.md"), "new.md", raw)
+    _delete(sess, old.doc_id)
+    good = 'assert supplier {name: "VoltaChem", country: "DE"} source doc:new.md#p0 as s1'
+    runner = ScriptedRunner([good])
+    extract(sess, r.doc_id, runner)
+    assert "Stale focus." not in runner.prompts[0]

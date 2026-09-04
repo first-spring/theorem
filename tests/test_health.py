@@ -84,3 +84,38 @@ def test_health_queryable_worklist(fixture_store, schema):
         ReadContext(),
     )
     assert "lithium cell" in out and "results: 1 of 1" in out
+
+
+def test_a_deleted_edge_leaves_its_node_an_orphan(fixture_store):
+    """`degree` is a live count. Counting a tombstoned edge would report a
+    node as connected to something no read can reach."""
+    store = fixture_store
+    nid = store.next_id("supplier")
+    store.apply(
+        {
+            "op": "put_node",
+            "id": nid,
+            "cls": "supplier",
+            "props": {"name": "Solo Corp", "country": "US"},
+        }
+    )
+    eid = store.next_id("edge")
+    store.apply(
+        {
+            "op": "put_edge",
+            "id": eid,
+            "type": "supplied_by",
+            "roles": {"item": store.ids["cell"], "source": nid},
+        }
+    )
+    assert health.scores(store, nid)["structure"] < 0.1
+    store.apply(
+        {
+            "op": "delete",
+            "id": eid,
+            "kind": "edge",
+            "reason": "",
+            "cascade": [["edge", eid]],
+        }
+    )
+    assert health.scores(store, nid)["structure"] == 0.3

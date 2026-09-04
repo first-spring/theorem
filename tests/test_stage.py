@@ -57,3 +57,25 @@ def test_staged_table_is_refinable(sess):
         f'{{name: col "name", unit_cost: col "unit_cost"}} as np'
     )
     assert "refined" in out
+
+
+def test_restaging_a_file_whose_document_was_deleted_makes_a_new_one(sess):
+    """The sha256 scan is a reader too: a tombstoned document must not
+    answer "already staged" for a file nothing in the graph holds."""
+    raw = b"# Same\ncontent"
+    env = normalize(raw, "a.md")
+    r1 = stage(sess, env, "a.md", raw)
+    cascade = sess.store.cascade(nodes=[r1.doc_id])
+    sess.store.apply(
+        {
+            "op": "delete",
+            "id": r1.doc_id,
+            "kind": "node",
+            "reason": "superseded",
+            "cascade": [["node", n] for n in cascade.nodes]
+            + [["edge", e] for e in cascade.edges],
+        }
+    )
+    r2 = stage(sess, env, "a.md", raw)
+    assert not r2.existing
+    assert r2.doc_id != r1.doc_id

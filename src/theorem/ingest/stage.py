@@ -76,8 +76,10 @@ def stage(session, envelope: Envelope, filename: str, raw: bytes) -> StageReceip
     store = session.store
     digest = hashlib.sha256(raw).hexdigest()
 
+    # A tombstoned document holds no chunks anything can read, so answering
+    # "already staged" from one would refuse to load a file the graph lost.
     for node in store.nodes.values():
-        if node.cls == "document" and node.props.get("sha256") == digest:
+        if node.cls == "document" and node.live and node.props.get("sha256") == digest:
             return StageReceipt(
                 doc_id=node.id,
                 chunks=0,
