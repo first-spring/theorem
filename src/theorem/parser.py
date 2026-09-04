@@ -11,6 +11,7 @@ import re
 
 from .ast_nodes import (
     Aggregate,
+    AlterClass,
     AssertEdge,
     AssertNode,
     Clause,
@@ -844,6 +845,26 @@ class _Parser:
         cls, prop = w.split(".")
         self.expect_word("to")
         return RenameProp(cls, prop, self.expect_name())
+
+    def parse_alter(self) -> AlterClass:
+        self.expect_word("class")
+        cls = self.expect_name()
+        action = self.expect_word("add", "drop", "retype")
+        if action == "drop":
+            self.expect_punct("{")
+            names: list[str] = []
+            while True:
+                names.append(self.expect_name())
+                if self.peek() == ("punct", ","):
+                    self.i += 1
+                    continue
+                self.expect_punct("}")
+                break
+            return AlterClass(cls, action, names=names)
+        decls = self.propdecls()
+        if not decls:
+            raise ParseError(self.line_no, f"alter class {cls} {action} needs at least one property")
+        return AlterClass(cls, action, decls=decls)
 
     def parse_schema(self) -> SchemaStmt:
         return SchemaStmt()

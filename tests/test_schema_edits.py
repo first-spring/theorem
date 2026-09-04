@@ -139,3 +139,54 @@ def test_renames_survive_restart(tmp_path):
     s2 = Session(db, Schema.supply_chain())
     assert s2.rows("find vendor as v\nreturn v.nation") == [["DE"]]
     s2.close()
+
+
+def test_alter_add_then_set(tmp_path):
+    from theorem.canonical import canonical
+
+    assert canonical("alter class supplier add {rating: float}") == "alter class supplier add {rating: float}"
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "A"} as a')
+    s.execute("alter class supplier add {rating: float}\nset a {rating: 4.5}")
+    assert s.rows("find supplier as x\nreturn x.rating") == [[4.5]]
+    assert "already exists" in s.run("alter class supplier add {name: str}")
+    s.close()
+
+def test_alter_drop_removes_values(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "A", country: "DE"} as a')
+    s.execute("alter class supplier drop {country}")
+    assert "unknown property" in s.run("find supplier as x\nreturn x.country")
+    assert "country" not in s.store.nodes["#s-1"].props
+    # dropping name is rejected before it ever reaches own_prop's base-class
+    # check: supplier declares name itself, so the guard is the explicit
+    # "nodes are indexed by it" one, not a base-class message
+    assert "name cannot be dropped; nodes are indexed by it" in s.run("alter class supplier drop {name}")
+    s.close()
+
+def test_alter_retype_converts_or_refuses_naming_offenders(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert supplier {name: "A", country: "12"} as a')
+    s.execute('assert supplier {name: "B", country: "DE"} as b')
+    out = s.run("alter class supplier retype {country: int}")
+    # unlike a VerifyError, this refusal comes from the writer (it needs the
+    # store to preflight every value), so it is a WriteError; as the first
+    # and only statement in the program, Session._execute reports zero
+    # writes committed, which for a single failing statement means no
+    # partial-commit suffix is appended at all
+    assert "cannot convert" in out and "#s-2" in out and "committed" not in out
+    s.execute('set b {country: "7"}')
+    s.execute("alter class supplier retype {country: int}")
+    assert s.rows("find supplier as x\nreturn x.name, x.country order by x.name") == [["A", 12], ["B", 7]]
+    s.close()
+
+def test_alters_survive_restart(tmp_path):
+    db = tmp_path / "db"
+    s1 = Session(db, Schema.supply_chain())
+    s1.execute('assert supplier {name: "A", country: "7"} as a')
+    s1.execute("alter class supplier add {rating: float}\nalter class supplier retype {country: int}\nalter class supplier drop {rating}")
+    s1.close()
+    s2 = Session(db, Schema.supply_chain())
+    assert s2.schema.classes["supplier"].props == {"name": "str", "country": "int"}
+    assert s2.rows("find supplier as x\nreturn x.country") == [[7]]
+    s2.close()

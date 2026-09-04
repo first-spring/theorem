@@ -11,6 +11,7 @@ import difflib
 from dataclasses import dataclass, field
 
 from ..ast_nodes import (
+    AlterClass,
     AssertEdge,
     AssertNode,
     Compact,
@@ -707,6 +708,51 @@ def _rename_prop(stmt: RenameProp, ctx: WriteContext) -> Receipt:
     ctx.schema.rename_prop(stmt.cls, stmt.name, stmt.to)
     return Receipt([f"receipt: renamed property {stmt.cls}.{stmt.name} to {stmt.to} at @t-{pos}"])
 
+def _alter_class(stmt: AlterClass, ctx: WriteContext) -> Receipt:
+    store, schema = ctx.store, ctx.schema
+    if stmt.action == "retype":
+        bad = []
+        for cls in store._class_and_subclasses(stmt.cls):
+            for nid in store.by_class.get(cls, []):
+                # tombstoned and retired nodes are converted on replay too,
+                # so they must convert now or the record must not be written
+                node = store.nodes[nid]
+                for name, typ in stmt.decls.items():
+                    if name in node.props:
+                        try:
+                            store.retype_value(node.props[name], typ)
+                        except (ValueError, TypeError):
+                            bad.append(f"{nid}.{name}={node.props[name]!r}")
+        if bad:
+            raise WriteError(
+                f"cannot convert {len(bad)} values on {stmt.cls}: " + ", ".join(bad[:10])
+                + ("..." if len(bad) > 10 else "") + ". set them first"
+            )
+    record = {"op": "lineage", "kind": "alter_class", "cls": stmt.cls, "action": stmt.action}
+    if stmt.action == "drop":
+        record["names"] = stmt.names
+        # The values leave the nodes; the record keeps them, so history
+        # survives compaction and a later reload can consult them.
+        record["values"] = {
+            nid: {name: store.nodes[nid].props[name] for name in stmt.names if name in store.nodes[nid].props}
+            for cls in store._class_and_subclasses(stmt.cls)
+            for nid in store.by_class.get(cls, [])
+            if any(name in store.nodes[nid].props for name in stmt.names)
+        }
+    else:
+        record["decls"] = stmt.decls
+    pos = store.apply(record)
+    if stmt.action == "add":
+        schema.alter_add(stmt.cls, stmt.decls)
+        what = "added " + ", ".join(stmt.decls)
+    elif stmt.action == "drop":
+        schema.alter_drop(stmt.cls, stmt.names)
+        what = "dropped " + ", ".join(stmt.names)
+    else:
+        schema.alter_retype(stmt.cls, stmt.decls)
+        what = "retyped " + ", ".join(f"{k}: {v}" for k, v in stmt.decls.items())
+    return Receipt([f"receipt: altered class {stmt.cls} at @t-{pos}", f"  {what}"])
+
 def deprecate_class(session, name: str) -> str:
     cdef = session.schema.classes[name]
     pos = session.store.apply(
@@ -750,5 +796,7 @@ def execute_write(stmt: Stmt, ctx: WriteContext) -> Receipt:
             return _rename_class(stmt, ctx)
         case RenameProp():
             return _rename_prop(stmt, ctx)
+        case AlterClass():
+            return _alter_class(stmt, ctx)
         case _:
             raise WriteError(f"not a write statement: {type(stmt).__name__}")

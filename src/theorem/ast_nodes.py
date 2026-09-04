@@ -210,5 +210,13 @@ class RenameProp(Stmt):
 
 
 @dataclass
+class AlterClass(Stmt):
+    cls: str
+    action: str  # add | drop | retype
+    decls: dict[str, str] = field(default_factory=dict)  # add, retype
+    names: list[str] = field(default_factory=list)  # drop
+
+
+@dataclass
 class SchemaStmt(Stmt):
     pass

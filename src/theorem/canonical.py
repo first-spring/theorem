@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from .ast_nodes import (
     Aggregate,
+    AlterClass,
     AssertEdge,
     AssertNode,
     Clause,
@@ -218,4 +219,9 @@ def render_stmt(stmt: Stmt) -> str:
             return f"rename class {n} to {to}"
         case RenameProp(cls=cls, name=n, to=to):
             return f"rename property {cls}.{n} to {to}"
+        case AlterClass(cls=cls, action=action, decls=decls, names=names):
+            if action == "drop":
+                return f"alter class {cls} drop {{{', '.join(names)}}}"
+            body = ", ".join(f"{k}: {v}" for k, v in decls.items())
+            return f"alter class {cls} {action} {{{body}}}"
     raise CanonicalError(f"cannot render {type(stmt).__name__}")

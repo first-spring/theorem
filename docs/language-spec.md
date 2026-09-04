@@ -34,7 +34,7 @@ or          := "or"                                   ; alone on its line
 
 write_stmt  := assert_node | assert_edge | merge | distinct_s | refine
              | compact | retire | flag | set_stmt | delete | withdraw
-             | restore | derive | rename
+             | restore | derive | rename | alter
 assert_node := "assert" CLASSNAME props [support] "as" NAME
 assert_edge := "assert" "edge" EDGENAME "(" ROLENAME ":" ref ","
                ROLENAME ":" ref ")" [support]
@@ -58,6 +58,9 @@ derive      := "derive" "class" NAME "from" CLASSNAME "with" propdecls
                  ROLENAME ":" CLASSNAME ")"
 rename      := "rename" "class" NAME "to" NAME
              | "rename" "property" NAME "." NAME "to" NAME
+alter       := "alter" "class" NAME "add" propdecls
+             | "alter" "class" NAME "drop" "{" NAME ("," NAME)* "}"
+             | "alter" "class" NAME "retype" propdecls
 
 util_stmt   := "schema"
 
@@ -140,6 +143,7 @@ Every write returns a **receipt**: created and changed ids, position `@t-N`, the
 - **derive edge name(role: class, role: class)**: declares an edge type at runtime, with exactly two roles. Both survive a restart: the derivation is a lineage record, and a session rebuilds the schema entries a previous process created.
 - **rename class a to b**: in place. Nodes keep their ids (the id letter is cosmetic; new nodes take the new letter), subclasses keep their base, edge roles follow. Refuses an existing, reserved, or malformed name.
 - **rename property c.a to b**: in place on every node of the class and its subclasses. Only a property the class declares itself; the error names the base class otherwise.
+- **alter class c add {..} / drop {..} / retype {..}**: in place. `add` declares properties existing nodes lack until `set`. `drop` removes the declaration and the values from every live node of the class and its subclasses; history keeps them. `retype` converts every live value first and refuses the statement, naming the nodes, if any value cannot convert. Only properties the class declares itself.
 
 ## Dedup
 

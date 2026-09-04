@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from .ast_nodes import (
     Aggregate,
+    AlterClass,
     AssertEdge,
     AssertNode,
     Col,
@@ -560,6 +561,29 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
             if not re.fullmatch(r"[a-z][a-z0-9_]*", to):
                 raise VerifyError(line, f'property name "{to}" must be a lowercase identifier')
             schema.rename_prop(cls, name, to)
+
+        case AlterClass(cls=cls, action=action, decls=decls, names=names):
+            _check_class(schema, cls, line)
+            try:
+                if action == "add":
+                    for prop in decls:
+                        if prop in schema.all_props(cls):
+                            raise VerifyError(line, f'property "{prop}" already exists on class {cls}')
+                        if not re.fullmatch(r"[a-z][a-z0-9_]*", prop):
+                            raise VerifyError(line, f'property name "{prop}" must be a lowercase identifier')
+                    schema.alter_add(cls, decls)
+                elif action == "drop":
+                    if "name" in names:
+                        raise VerifyError(line, "name cannot be dropped; nodes are indexed by it")
+                    schema.alter_drop(cls, names)
+                else:
+                    schema.alter_retype(cls, decls)
+            except KeyError as e:
+                raise VerifyError(
+                    line, f'unknown property "{e.args[0]}" on class {cls}.{_suggest(e.args[0], schema.all_props(cls))}'
+                )
+            except ValueError as e:
+                raise VerifyError(line, str(e))
 
         case SchemaStmt():
             pass
