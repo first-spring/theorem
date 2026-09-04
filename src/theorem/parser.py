@@ -24,6 +24,8 @@ from .ast_nodes import (
     DeriveClass,
     DeriveEdge,
     Distinct,
+    DropClass,
+    DropEdge,
     Find,
     Flag,
     Follow,
@@ -865,6 +867,14 @@ class _Parser:
         if not decls:
             raise ParseError(self.line_no, f"alter class {cls} {action} needs at least one property")
         return AlterClass(cls, action, decls=decls)
+
+    def parse_drop(self) -> Stmt:
+        what = self.expect_word("class", "edge")
+        name = self.expect_name()
+        self.expect_word("reason")
+        reason = self.string()
+        preview = self.preview_opt()
+        return DropClass(name, reason, preview) if what == "class" else DropEdge(name, reason, preview)
 
     def parse_schema(self) -> SchemaStmt:
         return SchemaStmt()

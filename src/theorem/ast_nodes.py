@@ -218,5 +218,17 @@ class AlterClass(Stmt):
 
 
 @dataclass
+class DropClass(Stmt):
+    name: str
+    reason: str
+    preview: bool = False
+
+@dataclass
+class DropEdge(Stmt):
+    name: str
+    reason: str
+    preview: bool = False
+
+@dataclass
 class SchemaStmt(Stmt):
     pass

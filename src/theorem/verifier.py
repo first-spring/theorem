@@ -25,6 +25,8 @@ from .ast_nodes import (
     DeriveClass,
     DeriveEdge,
     Distinct,
+    DropClass,
+    DropEdge,
     Find,
     Flag,
     Follow,
@@ -50,6 +52,7 @@ NODE_PSEUDO_PROPS = {"class", "health", "lineage", "id", "state"}
 HEALTH_SUBSCORES = {"loss", "query", "structure", "staleness"}
 DUP_CANDIDATE_PROPS = {"class", "score", "a", "b", "evidence"}
 SPECIAL_TARGETS = {"nodes", "dup_candidates", "class"}
+BUILTIN_CLASSES = frozenset(Schema().classes)
 
 
 class VerifyError(Exception):
@@ -584,6 +587,24 @@ def _verify_stmt(stmt: Stmt, schema: Schema, env: dict[str, str]) -> None:
                 )
             except ValueError as e:
                 raise VerifyError(line, str(e))
+
+        case DropClass(name=name, preview=preview):
+            _check_class(schema, name, line)
+            if name in BUILTIN_CLASSES:
+                raise VerifyError(line, f'class "{name}" is built-in and cannot be dropped')
+            children = [c.name for c in schema.classes.values() if c.base == name]
+            if children:
+                raise VerifyError(
+                    line, f'class "{name}" has subclasses ({", ".join(children)}); drop them first'
+                )
+            if not preview:
+                schema.drop_class(name)
+
+        case DropEdge(name=name, preview=preview):
+            if name not in schema.edges:
+                raise VerifyError(line, f'unknown edge type "{name}".{_suggest(name, schema.edges)}')
+            if not preview:
+                schema.drop_edge(name)
 
         case SchemaStmt():
             pass

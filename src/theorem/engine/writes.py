@@ -19,6 +19,8 @@ from ..ast_nodes import (
     DeriveClass,
     DeriveEdge,
     Distinct,
+    DropClass,
+    DropEdge,
     Flag,
     Merge,
     Refine,
@@ -753,6 +755,46 @@ def _alter_class(stmt: AlterClass, ctx: WriteContext) -> Receipt:
         what = "retyped " + ", ".join(f"{k}: {v}" for k, v in stmt.decls.items())
     return Receipt([f"receipt: altered class {stmt.cls} at @t-{pos}", f"  {what}"])
 
+def _drop_class(stmt: DropClass, ctx: WriteContext) -> Receipt:
+    store, schema = ctx.store, ctx.schema
+    nodes = [nid for nid in store.by_class.get(stmt.name, []) if store.nodes[nid].live]
+    edge_types = [e for e, edef in schema.edges.items() if stmt.name in edef.roles.values()]
+    typed = [e.id for e in store.edge_index.values() if e.live and e.type in edge_types]
+    cascade = store.cascade(nodes=nodes, edges=typed)
+    lines = _cascade_lines(store, cascade) + [f"  edge types: {', '.join(edge_types) or 'none'}"]
+    if stmt.preview:
+        return Receipt([f"preview: drop class {stmt.name} would remove", *lines])
+    pos = store.apply(
+        {
+            "op": "lineage",
+            "kind": "drop_class",
+            "name": stmt.name,
+            "reason": stmt.reason,
+            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+            "edge_types": edge_types,
+        }
+    )
+    schema.drop_class(stmt.name)
+    return Receipt([f"receipt: dropped class {stmt.name} at @t-{pos}", f"  reason: {stmt.reason}", *lines])
+
+def _drop_edge(stmt: DropEdge, ctx: WriteContext) -> Receipt:
+    store, schema = ctx.store, ctx.schema
+    typed = [e.id for e in store.edge_index.values() if e.live and e.type == stmt.name]
+    cascade = store.cascade(edges=typed)
+    if stmt.preview:
+        return Receipt([f"preview: drop edge {stmt.name} would remove", *_cascade_lines(store, cascade)])
+    pos = store.apply(
+        {
+            "op": "lineage",
+            "kind": "drop_edge",
+            "name": stmt.name,
+            "reason": stmt.reason,
+            "cascade": [["node", n] for n in cascade.nodes] + [["edge", e] for e in cascade.edges],
+        }
+    )
+    schema.drop_edge(stmt.name)
+    return Receipt([f"receipt: dropped edge {stmt.name} at @t-{pos}", f"  reason: {stmt.reason}", *_cascade_lines(store, cascade)])
+
 def deprecate_class(session, name: str) -> str:
     cdef = session.schema.classes[name]
     pos = session.store.apply(
@@ -798,5 +840,9 @@ def execute_write(stmt: Stmt, ctx: WriteContext) -> Receipt:
             return _rename_prop(stmt, ctx)
         case AlterClass():
             return _alter_class(stmt, ctx)
+        case DropClass():
+            return _drop_class(stmt, ctx)
+        case DropEdge():
+            return _drop_edge(stmt, ctx)
         case _:
             raise WriteError(f"not a write statement: {type(stmt).__name__}")

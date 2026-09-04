@@ -34,7 +34,7 @@ or          := "or"                                   ; alone on its line
 
 write_stmt  := assert_node | assert_edge | merge | distinct_s | refine
              | compact | retire | flag | set_stmt | delete | withdraw
-             | restore | derive | rename | alter
+             | restore | derive | rename | alter | drop
 assert_node := "assert" CLASSNAME props [support] "as" NAME
 assert_edge := "assert" "edge" EDGENAME "(" ROLENAME ":" ref ","
                ROLENAME ":" ref ")" [support]
@@ -61,6 +61,8 @@ rename      := "rename" "class" NAME "to" NAME
 alter       := "alter" "class" NAME "add" propdecls
              | "alter" "class" NAME "drop" "{" NAME ("," NAME)* "}"
              | "alter" "class" NAME "retype" propdecls
+drop        := "drop" "class" NAME "reason" STRING ["preview"]
+             | "drop" "edge" NAME "reason" STRING ["preview"]
 
 util_stmt   := "schema"
 
@@ -144,6 +146,7 @@ Every write returns a **receipt**: created and changed ids, position `@t-N`, the
 - **rename class a to b**: in place. Nodes keep their ids (the id letter is cosmetic; new nodes take the new letter), subclasses keep their base, edge roles follow. Refuses an existing, reserved, or malformed name.
 - **rename property c.a to b**: in place on every node of the class and its subclasses. Only a property the class declares itself; the error names the base class otherwise.
 - **alter class c add {..} / drop {..} / retype {..}**: in place. `add` declares properties existing nodes lack until `set`. `drop` removes the declaration and the values from every live node of the class and its subclasses; history keeps them. `retype` converts every live value first and refuses the statement, naming the nodes, if any value cannot convert. Only properties the class declares itself.
+- **drop class c reason "..."** / **drop edge e reason "..."**: removes the declaration; deletes every live instance and, for a class, every edge type naming it, then the cascade. Built-in classes and classes with subclasses are refused. Not restorable: derive again and reload. A dropped name may be derived again in the same program.
 
 ## Dedup
 

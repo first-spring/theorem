@@ -32,6 +32,8 @@ from .ast_nodes import (
     DeriveClass,
     DeriveEdge,
     Distinct,
+    DropClass,
+    DropEdge,
     Find,
     Flag,
     Follow,
@@ -224,4 +226,8 @@ def render_stmt(stmt: Stmt) -> str:
                 return f"alter class {cls} drop {{{', '.join(names)}}}"
             body = ", ".join(f"{k}: {v}" for k, v in decls.items())
             return f"alter class {cls} {action} {{{body}}}"
+        case DropClass(name=n, reason=reason, preview=preview):
+            return f"drop class {n} reason {_quoted(reason)}" + (" preview" if preview else "")
+        case DropEdge(name=n, reason=reason, preview=preview):
+            return f"drop edge {n} reason {_quoted(reason)}" + (" preview" if preview else "")
     raise CanonicalError(f"cannot render {type(stmt).__name__}")

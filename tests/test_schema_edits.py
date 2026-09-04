@@ -190,3 +190,49 @@ def test_alters_survive_restart(tmp_path):
     assert s2.schema.classes["supplier"].props == {"name": "str", "country": "int"}
     assert s2.rows("find supplier as x\nreturn x.country") == [[7]]
     s2.close()
+
+def test_drop_class_takes_nodes_edges_and_edge_types(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert product {name: "Saw"} as p')
+    s.execute('assert part {name: "blade"} as b')
+    s.execute("assert edge uses(whole: p, component: b)")
+    out = s.execute('drop class product reason "not a thing" preview')
+    assert "preview: drop class product would remove" in out
+    assert "cascade: 1 nodes, 1 edges" in out and "edge types: uses" in out
+    assert "product" in s.schema.classes
+    out = s.execute('drop class product reason "not a thing"')
+    assert "receipt: dropped class product at @t-" in out
+    assert "product" not in s.schema.classes and "uses" not in s.schema.edges
+    assert "unknown class" in s.run("find product as p\nreturn p.name")
+    assert s.rows("find part as b\nreturn b.name") == [["blade"]]
+    s.close()
+
+def test_drop_class_refuses_builtins_and_parents(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    assert "built-in" in s.run('drop class entity reason "x"')
+    s.execute("derive class gadget from product with {}")
+    assert "subclasses" in s.run('drop class product reason "x"')
+    s.close()
+
+def test_drop_edge_type(tmp_path):
+    s = Session(tmp_path / "db", Schema.supply_chain())
+    s.execute('assert product {name: "Saw"} as p')
+    s.execute('assert part {name: "blade"} as b')
+    s.execute("assert edge uses(whole: p, component: b)")
+    out = s.execute('drop edge uses reason "wrong model"')
+    assert "receipt: dropped edge uses at @t-" in out and "cascade: 0 nodes, 1 edges" in out
+    assert "uses" not in s.schema.edges
+    assert s.rows("find product as p\nreturn p.name") == [["Saw"]]
+    s.close()
+
+def test_drops_survive_restart_and_a_dropped_name_can_return(tmp_path):
+    db = tmp_path / "db"
+    s1 = Session(db, Schema())
+    s1.execute("derive class tag from entity with {}")
+    s1.execute('assert tag {name: "old"} as t')
+    s1.execute('drop class tag reason "replace"\nderive class tag from entity with {colour: str}')
+    s1.close()
+    s2 = Session(db, Schema())
+    assert s2.schema.classes["tag"].props == {"colour": "str"}
+    assert s2.rows("find tag as t\nreturn t.name") == []
+    s2.close()

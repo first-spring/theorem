@@ -388,7 +388,6 @@ def test_restore_leaves_an_artifact_dead_when_its_other_evidence_is(tmp_path):
     s.close()
 
 
-@pytest.mark.xfail(strict=True, reason="drop class lands in Task 12")
 def test_restore_refuses_a_drop(tmp_path):
     from theorem.schema import Schema
     from theorem.session import Session

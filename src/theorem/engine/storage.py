@@ -454,6 +454,8 @@ class Store:
             if "support" not in record:
                 raise StoreError("patch_edge: support is required")
             _check_support(record)
+        elif op == "lineage" and record.get("kind") in ("drop_class", "drop_edge"):
+            _check_cascade(record)
 
     def _live_artifact(self, art_id, kind):
         if kind == "node":
