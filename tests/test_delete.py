@@ -241,3 +241,35 @@ def test_sweep_skips_a_tombstoned_node(tmp_path):
     store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
     assert dedup.sweep(store) == 0
     assert store.dup_ledger == []
+
+
+def test_patch_edge_without_support_is_refused_before_the_wal(tmp_path):
+    import pytest
+
+    from theorem.engine.storage import StoreError
+
+    store = Store(tmp_path)
+    p = put(store, "part", name="cell")
+    s = put(store, "supplier", name="Ionix")
+    e = link(store, "supplied_by", support=[["doc:a.csv#r1"]], item=p, source=s)
+    before = store.position
+    with pytest.raises(StoreError):
+        store.apply({"op": "patch_edge", "id": e})
+    assert store.position == before
+    assert store.wal_len() == before
+    store.close()
+    again = Store(tmp_path)
+    assert again.edge_index[e].support == [["doc:a.csv#r1"]]
+    again.close()
+
+
+def test_restore_refuses_malformed_kept_dead(tmp_path):
+    import pytest
+
+    from theorem.engine.storage import StoreError
+
+    store = Store(tmp_path)
+    a = put(store, "supplier", name="A")
+    p = store.apply({"op": "delete", "id": a, "kind": "node", "reason": "", "cascade": [["node", a]]})
+    with pytest.raises(StoreError):
+        store.apply({"op": "restore", "of": p, "kept_dead": [["node", a]]})

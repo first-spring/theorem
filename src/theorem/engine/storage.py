@@ -435,9 +435,20 @@ class Store:
                 )
             if not isinstance(of, int) or not self._deleted_by(of):
                 raise StoreError(f"restore: nothing was deleted at @t-{of}")
+            kept_dead = record.get("kept_dead", [])
+            if not isinstance(kept_dead, list) or not all(
+                isinstance(m, list)
+                and len(m) == 3
+                and m[0] in ("node", "edge")
+                and isinstance(m[2], int)
+                for m in kept_dead
+            ):
+                raise StoreError("restore: kept_dead must be a list of [kind, id, by]")
         elif op == "patch_edge":
             if record.get("id") not in self.edge_index:
                 raise StoreError(f"patch_edge: unknown edge {record.get('id')!r}")
+            if "support" not in record:
+                raise StoreError("patch_edge: support is required")
             _check_support(record)
 
     def _live_artifact(self, art_id, kind):
