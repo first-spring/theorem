@@ -66,6 +66,14 @@ class Node:
     blob_traversals: int = 0  # traversals into blob payload
     conflict_count: int = 0  # conflicting re-asserts of same property
     last_confirmed: int = 0  # position of last confirming write
+    # receipt: alternative evidence bundles, each sufficient on its own
+    support: list[list[str]] = field(default_factory=list)
+    deleted_at: int | None = None
+    deleted_by: int | None = None  # position of the deletion that took it
+
+    @property
+    def live(self) -> bool:
+        return self.retired_at is None and self.deleted_at is None
 
 
 @dataclass
@@ -76,6 +84,13 @@ class Edge:
     props: dict[str, object] = field(default_factory=dict)
     created_at: int = 0
     retired_at: int | None = None
+    support: list[list[str]] = field(default_factory=list)
+    deleted_at: int | None = None
+    deleted_by: int | None = None
+
+    @property
+    def live(self) -> bool:
+        return self.retired_at is None and self.deleted_at is None
 
 
 def _index_values(value) -> list:
@@ -92,6 +107,36 @@ def _index_values(value) -> list:
         return []
     items = value if isinstance(value, list) else [value]
     return [fold(v) for v in items if v is not None]
+
+
+def source_of(token: str) -> str | None:
+    """The document a provenance token belongs to: `doc:a.csv#r7` -> `doc:a.csv`."""
+    if token.startswith(("doc:", "attach:")):
+        return token.split("#", 1)[0]
+    return None
+
+
+MAX_BUNDLES = 8
+
+
+def cap_bundles(support: list[list[str]]) -> list[list[str]]:
+    """At most eight bundles, keeping the smallest, as the paper does.
+
+    Dropping a bundle can only make an artifact look deader than it is,
+    never keep it alive on evidence it does not have, so the cap never leaks.
+    Stable on length so equal-sized bundles keep their written order.
+    """
+    return sorted((list(b) for b in support), key=len)[:MAX_BUNDLES]
+
+
+def _check_support(record: dict) -> None:
+    support = record.get("support")
+    if support is None:
+        return
+    if not isinstance(support, list) or not all(
+        isinstance(b, list) and all(isinstance(m, str) for m in b) for b in support
+    ):
+        raise StoreError(f"{record['op']}: support must be a list of lists of strings")
 
 
 class Store:
@@ -152,6 +197,11 @@ class Store:
         self.distinct_pairs: set[frozenset] = set()
         self.dup_ledger: list[dict] = []
         self.aliases: dict[str, str] = {}
+        # evidence token or artifact id -> artifacts whose receipt cites it,
+        # and endpoint node id -> edges on it. What a deletion walks.
+        self.dependents: dict[str, set[str]] = {}
+        # document name -> artifacts citing any anchor of it. What withdraw seeds.
+        self.sources: dict[str, set[str]] = {}
         self.id_counters: dict[str, int] = {}
         self.position = 0
         try:
@@ -333,6 +383,8 @@ class Store:
         self.distinct_pairs = set()
         self.dup_ledger = []
         self.aliases = {}
+        self.dependents = {}
+        self.sources = {}
         self.id_counters = {}
         self.position = 0
         self._wal_records = 0
@@ -349,6 +401,9 @@ class Store:
         elif op == "put_node":
             if not isinstance(record.get("props"), dict):
                 raise StoreError("put_node: props must be an object")
+            _check_support(record)
+        elif op == "put_edge":
+            _check_support(record)
 
     def apply(self, record: dict) -> int:
         """Append to WAL, apply to memory, return the new position."""
@@ -432,6 +487,7 @@ class Store:
                     "props": n.props,
                     "state": n.state,
                     "origin": n.origin,
+                    "support": n.support,
                     "_pos": n.created_at,
                     "_restore": {
                         "retired_at": n.retired_at,
@@ -440,6 +496,8 @@ class Store:
                         "blob_traversals": n.blob_traversals,
                         "conflict_count": n.conflict_count,
                         "last_confirmed": n.last_confirmed,
+                        "deleted_at": n.deleted_at,
+                        "deleted_by": n.deleted_by,
                     },
                 }
             )
@@ -451,8 +509,13 @@ class Store:
                     "type": e.type,
                     "roles": e.roles,
                     "props": e.props,
+                    "support": e.support,
                     "_pos": e.created_at,
-                    "_restore": {"retired_at": e.retired_at},
+                    "_restore": {
+                        "retired_at": e.retired_at,
+                        "deleted_at": e.deleted_at,
+                        "deleted_by": e.deleted_by,
+                    },
                 }
             )
         for rec in self.lineage:
@@ -547,6 +610,22 @@ class Store:
                 else:
                     index.pop(value, None)
 
+    def _index_support(self, art_id: str, support: list[list[str]]) -> None:
+        for bundle in support:
+            for member in bundle:
+                self.dependents.setdefault(member, set()).add(art_id)
+                doc = source_of(member)
+                if doc is not None:
+                    self.sources.setdefault(doc, set()).add(art_id)
+
+    def _deindex_support(self, art_id: str, support: list[list[str]]) -> None:
+        for bundle in support:
+            for member in bundle:
+                self.dependents.get(member, set()).discard(art_id)
+                doc = source_of(member)
+                if doc is not None:
+                    self.sources.get(doc, set()).discard(art_id)
+
     def _name_key(self, node) -> tuple[str, str] | None:
         from .text import fold
 
@@ -614,6 +693,7 @@ class Store:
                 state=rec.get("state", "atom"),
                 created_at=pos,
                 origin=rec.get("origin"),
+                support=cap_bundles(rec.get("support") or []),
             )
             node.last_confirmed = pos
             for k, v in rec.get("_restore", {}).items():
@@ -622,6 +702,7 @@ class Store:
             self.by_class.setdefault(node.cls, []).append(node.id)
             self._index_name(node)
             self._index_props(node)
+            self._index_support(node.id, node.support)
             self.edges.setdefault(node.id, [])
             self._bump_counter(node.cls, node.id)
         elif op == "patch_node":
@@ -649,6 +730,7 @@ class Store:
                 roles=dict(rec["roles"]),
                 props=dict(rec.get("props") or {}),
                 created_at=pos,
+                support=cap_bundles(rec.get("support") or []),
             )
             for k, v in rec.get("_restore", {}).items():
                 setattr(edge, k, v)
@@ -656,6 +738,8 @@ class Store:
             self._bump_counter("edge", edge.id)
             for nid in edge.roles.values():
                 self.edges.setdefault(nid, []).append(edge)
+                self.dependents.setdefault(nid, set()).add(edge.id)
+            self._index_support(edge.id, edge.support)
         elif op == "retire":
             node = self.nodes[rec["id"]]
             node.retired_at = pos
